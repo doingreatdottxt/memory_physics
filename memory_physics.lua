@@ -1,5 +1,5 @@
 -- memory_physics.lua
--- Archeology Mode (transitional burial alpha)
+-- Archeology Mode (late burial transition version)
 
 engine.name = "None"
 
@@ -30,6 +30,8 @@ local can_trigger = true
 local burial_active = false
 local burial_progress = 0
 local burial_source_voice = nil
+local burial_release = false
+local burial_release_progress = 0
 
 ------------------------------------------------
 -- INIT
@@ -185,6 +187,8 @@ function monitor_input()
 
     end
 
+    update_burial_release()
+
     clock.sleep(0.05)
 
   end
@@ -202,7 +206,6 @@ function begin_new_layer()
   burial_active = true
   burial_progress = 0
 
-  -- preserve current top layer for gradual burial
   if layers[1].active then
     burial_source_voice = layers[1].voice
   else
@@ -248,7 +251,10 @@ function finalize_layer()
 
   burial_active = false
   burial_progress = 0
-  burial_source_voice = nil
+
+  -- continue fading old surface after recording ends
+  burial_release = true
+  burial_release_progress = 0
 
   apply_archeology()
 
@@ -264,10 +270,28 @@ function update_burial_progress()
     return
   end
 
-  burial_progress = burial_progress + 0.01
+  burial_progress = burial_progress + 0.006
 
   if burial_progress > 1 then
     burial_progress = 1
+  end
+
+  apply_archeology()
+
+end
+
+function update_burial_release()
+
+  if not burial_release then
+    return
+  end
+
+  burial_release_progress = burial_release_progress + 0.01
+
+  if burial_release_progress >= 1 then
+    burial_release = false
+    burial_release_progress = 1
+    burial_source_voice = nil
   end
 
   apply_archeology()
@@ -361,7 +385,7 @@ function apply_archeology()
       local gain = gain_table[depth]
 
       ------------------------------------------------
-      -- TRANSITIONAL BURIAL BEHAVIOR
+      -- ACTIVE BURIAL
       ------------------------------------------------
 
       if burial_active then
@@ -371,41 +395,72 @@ function apply_archeology()
         -- new layer gradually emerges
         if voice == incoming_voice then
 
-          gain = burial_progress
+          local emerge = math.min(1, burial_progress * 1.4)
 
-          softcut.level(voice, gain)
+          softcut.level(voice, emerge)
 
           softcut.post_filter_fc(voice, 12000)
 
           softcut.rate(voice,1.0)
 
-        -- previous surface gradually sinks
+        -- old surface stays exposed until late burial
         elseif voice == burial_source_voice then
 
-          local sink_gain = 1.0 - (burial_progress * 0.88)
+          local sink
 
-          softcut.level(voice, sink_gain)
+          if burial_progress < 0.7 then
+            sink = 1.0
+          else
+            sink = 1.0 - ((burial_progress - 0.7) / 0.3)
+          end
 
-          local cutoff = 12000 - (burial_progress * 10500)
+          sink = math.max(0.12, sink)
+
+          softcut.level(voice, sink)
+
+          local cutoff
+
+          if burial_progress < 0.7 then
+            cutoff = 12000
+          else
+            cutoff = 12000 - (((burial_progress - 0.7) / 0.3) * 10000)
+          end
 
           softcut.post_filter_fc(voice, cutoff)
 
-          local rate = 1.0 - (burial_progress * 0.015)
+          local rate = 1.0 - (burial_progress * 0.01)
 
           softcut.rate(voice, rate)
 
         else
 
-          -- deeper layers dormant during excavation
           softcut.level(voice,0)
 
         end
 
-      else
+      ------------------------------------------------
+      -- POST-BURIAL MEMORY FADE
+      ------------------------------------------------
 
-        ------------------------------------------------
-        -- NORMAL PLAYBACK DEGRADATION
-        ------------------------------------------------
+      elseif burial_release and voice == burial_source_voice then
+
+        local release = 1.0 - burial_release_progress
+
+        local gain_release = 0.65 * release
+
+        softcut.level(voice, gain_release)
+
+        local cutoff = 5000 - (release * 3500)
+
+        softcut.post_filter_fc(voice, cutoff)
+
+        softcut.rate(voice,0.985)
+
+      ------------------------------------------------
+      -- NORMAL PLAYBACK
+      ------------------------------------------------
+
+      else
 
         if layers[i].dropout then
           gain = gain * 0.15
@@ -499,6 +554,8 @@ function redraw()
 
   if burial_active then
     screen.text("BURIAL "..string.format("%.2f",burial_progress))
+  elseif burial_release then
+    screen.text("SETTLING")
   else
     screen.text("EXCAVATION STABLE")
   end
