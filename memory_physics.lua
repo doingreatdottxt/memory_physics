@@ -1,5 +1,5 @@
 -- memory_physics.lua
--- Archeology Mode (enhanced degradation)
+-- Archeology Mode (true resurfacing)
 
 engine.name = "None"
 
@@ -168,7 +168,7 @@ function monitor_input()
       end
 
       if silence_time > REMOVE_LAYER_TIMEOUT then
-        remove_top_layer()
+        collapse_memory_stack()
       end
 
     end
@@ -187,7 +187,7 @@ function begin_new_layer()
 
   recording = true
 
-  rotate_layers()
+  bury_layers()
 
   local voice = layers[1].voice
 
@@ -225,7 +225,11 @@ function finalize_layer()
 
 end
 
-function rotate_layers()
+------------------------------------------------
+-- BURIAL
+------------------------------------------------
+
+function bury_layers()
 
   local temp_voice = layers[NUM_LAYERS].voice
 
@@ -241,27 +245,39 @@ function rotate_layers()
   layers[1].active = false
   layers[1].dropout = false
 
-  apply_archeology()
-
 end
 
-function remove_top_layer()
+------------------------------------------------
+-- RESURFACING
+------------------------------------------------
 
-  if layers[1].active then
+function collapse_memory_stack()
 
-    local voice = layers[1].voice
+  if not layers[1].active then
+    return
+  end
 
-    print("remove top layer "..voice)
+  print("memory collapse")
 
-    softcut.level(voice,0)
+  local removed_voice = layers[1].voice
 
-    layers[1].active = false
+  softcut.level(removed_voice,0)
 
-    silence_time = 0
+  for i = 1, NUM_LAYERS - 1 do
 
-    apply_archeology()
+    layers[i].voice = layers[i+1].voice
+    layers[i].active = layers[i+1].active
+    layers[i].dropout = layers[i+1].dropout
 
   end
+
+  layers[NUM_LAYERS].voice = removed_voice
+  layers[NUM_LAYERS].active = false
+  layers[NUM_LAYERS].dropout = false
+
+  silence_time = 0
+
+  apply_archeology()
 
 end
 
@@ -294,7 +310,7 @@ function apply_archeology()
       local gain = gain_table[depth]
 
       if layers[i].dropout then
-        gain = gain * 0.2
+        gain = gain * 0.15
       end
 
       softcut.level(voice, gain)
@@ -308,26 +324,26 @@ function apply_archeology()
         5000,
         2200,
         900,
-        350
+        250
       }
 
       softcut.post_filter_fc(voice, cutoff_table[depth])
 
-      softcut.post_filter_rq(voice, 1.6)
+      softcut.post_filter_rq(voice, 1.8)
 
       ------------------------------------------------
       -- PLAYBACK INSTABILITY
       ------------------------------------------------
 
-      local drift_amount = {
+      local drift_table = {
         0.0,
-        0.003,
-        0.008,
-        0.02,
-        0.05
+        0.004,
+        0.012,
+        0.03,
+        0.08
       }
 
-      local drift = drift_amount[depth]
+      local drift = drift_table[depth]
 
       local rate = 1.0 + ((math.random() * drift) - (drift / 2))
 
@@ -337,15 +353,13 @@ function apply_archeology()
       -- STEREO COLLAPSE
       ------------------------------------------------
 
-      local pan_table = {
-        0,
-        0,
-        0,
-        -0.05 + math.random() * 0.1,
-        -0.02 + math.random() * 0.04
-      }
+      local pan_amount = 0
 
-      softcut.pan(voice, pan_table[depth])
+      if depth >= 4 then
+        pan_amount = (-0.05 + math.random() * 0.1)
+      end
+
+      softcut.pan(voice, pan_amount)
 
     else
 
@@ -358,7 +372,7 @@ function apply_archeology()
 end
 
 ------------------------------------------------
--- MEMORY LOSS / DROPOUTS
+-- MEMORY EROSION
 ------------------------------------------------
 
 function archeology_decay_clock()
@@ -369,15 +383,15 @@ function archeology_decay_clock()
 
       if layers[i].active then
 
-        local dropout_chance = 0
+        local chance = 0
 
         if i == 4 then
-          dropout_chance = 0.15
+          chance = 0.2
         elseif i == 5 then
-          dropout_chance = 0.35
+          chance = 0.45
         end
 
-        if math.random() < dropout_chance then
+        if math.random() < chance then
           layers[i].dropout = not layers[i].dropout
         end
 
@@ -387,7 +401,7 @@ function archeology_decay_clock()
 
     apply_archeology()
 
-    clock.sleep(0.7)
+    clock.sleep(0.6)
 
   end
 
@@ -417,7 +431,7 @@ function redraw()
   screen.text("S "..string.format("%.1f",silence_time))
 
   screen.move(10,70)
-  screen.text("5 MEMORY LAYERS")
+  screen.text("5 LAYERS")
 
   screen.update()
 
