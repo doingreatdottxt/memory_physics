@@ -1,6 +1,6 @@
 -- memory_physics.lua
 -- Archeology Mode Alpha
--- auto/manual excavation recording
+-- armed manual recording mode
 
 engine.name = "None"
 
@@ -25,6 +25,9 @@ local recording = false
 ------------------------------------------------
 
 local record_mode = "auto"
+
+local manual_armed = false
+local manual_waiting_for_input = false
 local manual_recording = false
 
 ------------------------------------------------
@@ -243,7 +246,7 @@ function monitor_input()
   while true do
 
     ------------------------------------------------
-    -- AUTO RECORD MODE
+    -- AUTO MODE
     ------------------------------------------------
 
     if record_mode == "auto" then
@@ -288,10 +291,27 @@ function monitor_input()
       end
 
     ------------------------------------------------
-    -- MANUAL RECORD MODE
+    -- MANUAL MODE
     ------------------------------------------------
 
     else
+
+      ------------------------------------------------
+      -- WAITING FOR INPUT
+      ------------------------------------------------
+
+      if manual_waiting_for_input then
+
+        if smoothed_level > threshold then
+
+          begin_new_layer()
+
+          manual_waiting_for_input = false
+          manual_recording = true
+
+        end
+
+      end
 
       silence_time = silence_time + 0.05
 
@@ -371,6 +391,8 @@ function finalize_layer()
   recording = false
 
   manual_recording = false
+  manual_armed = false
+  manual_waiting_for_input = false
 
   local voice = layers[MAX_LAYERS].voice
 
@@ -445,24 +467,40 @@ function finalize_layer()
 end
 
 ------------------------------------------------
--- MANUAL RECORD TOGGLE
+-- MANUAL ARM / STOP
 ------------------------------------------------
 
-function toggle_manual_record()
+function manual_record_control()
 
   if record_mode ~= "manual" then
     return
   end
 
-  if not manual_recording then
+  ------------------------------------------------
+  -- FIRST PRESS
+  ------------------------------------------------
 
-    manual_recording = true
+  if not manual_armed
+  and not manual_recording then
 
-    begin_new_layer()
+    manual_armed = true
+    manual_waiting_for_input = true
 
-  else
+    print("manual armed")
+
+    return
+
+  end
+
+  ------------------------------------------------
+  -- SECOND PRESS
+  ------------------------------------------------
+
+  if manual_recording then
 
     finalize_layer()
+
+    print("manual stop")
 
   end
 
@@ -773,18 +811,27 @@ function redraw()
   )
 
   screen.move(10,52)
+
+  if manual_waiting_for_input then
+
+    screen.text("ARMED")
+
+  elseif recording then
+
+    screen.text("RECORDING")
+
+  else
+
+    screen.text(environment)
+
+  end
+
+  screen.move(10,64)
+
   screen.text(
     "PRESS "..string.format("%.2f",
     excavation_pressure)
   )
-
-  screen.move(10,64)
-
-  if recording then
-    screen.text("RECORDING")
-  else
-    screen.text(environment)
-  end
 
   screen.update()
 
@@ -825,12 +872,12 @@ function key(n,z)
   end
 
   ------------------------------------------------
-  -- K3 = MANUAL RECORD
+  -- K3 = ARM / STOP
   ------------------------------------------------
 
   if n == 3 and z == 1 then
 
-    toggle_manual_record()
+    manual_record_control()
 
   end
 
