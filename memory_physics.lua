@@ -1,32 +1,41 @@
 -- memory_physics.lua
--- MVP Prototype
+-- Archeology MVP (5-layer system)
 
 engine.name = "None"
 
 local poll_in
 
 local input_level = 0
+local smoothed_level = 0
+
 local threshold = 0.02
 
 local silence_time = 0
+local active_time = 0
+
 local recording = false
 
 local NEW_LAYER_TIMEOUT = 2
 local REMOVE_LAYER_TIMEOUT = 10
+local MIN_PHRASE_GAP = 1.5
 
 local LOOP_LENGTH = 8
 
-local layers = {
-  {voice=1, active=false},
-  {voice=2, active=false},
-  {voice=3, active=false}
-}
+local NUM_LAYERS = 5
+
+local layers = {}
+
+local can_trigger = true
 
 ------------------------------------------------
 -- INIT
 ------------------------------------------------
 
 function init()
+
+  for i = 1, NUM_LAYERS do
+    layers[i] = {voice = i, active = false}
+  end
 
   setup_softcut()
   setup_params()
@@ -48,7 +57,7 @@ function setup_softcut()
 
   softcut.buffer_clear()
 
-  for i = 1,3 do
+  for i = 1, NUM_LAYERS do
 
     local start_pos = (i - 1) * LOOP_LENGTH
     local end_pos = start_pos + LOOP_LENGTH
@@ -72,7 +81,6 @@ function setup_softcut()
     softcut.rec(i,0)
 
     softcut.rec_level(i,1.0)
-
     softcut.pre_level(i,0.0)
 
     softcut.fade_time(i,0.05)
@@ -83,6 +91,7 @@ function setup_softcut()
   end
 
 end
+
 ------------------------------------------------
 -- PARAMS
 ------------------------------------------------
@@ -103,7 +112,7 @@ function setup_params()
 end
 
 ------------------------------------------------
--- POLL
+-- INPUT POLL
 ------------------------------------------------
 
 function setup_poll()
@@ -113,7 +122,11 @@ function setup_poll()
   poll_in.time = 0.05
 
   poll_in.callback = function(val)
+
     input_level = val
+
+    smoothed_level = (smoothed_level * 0.8) + (val * 0.2)
+
   end
 
   poll_in:start()
@@ -128,17 +141,21 @@ function monitor_input()
 
   while true do
 
-    if input_level > threshold then
+    if smoothed_level > threshold then
 
       silence_time = 0
+      active_time = active_time + 0.05
 
-      if not recording then
+      if not recording and can_trigger and active_time > MIN_PHRASE_GAP then
         begin_new_layer()
+        can_trigger = false
       end
 
     else
 
       silence_time = silence_time + 0.05
+      active_time = 0
+      can_trigger = true
 
       if recording and silence_time > NEW_LAYER_TIMEOUT then
         finalize_layer()
@@ -168,21 +185,19 @@ function begin_new_layer()
 
   local voice = layers[1].voice
 
-  local start_pos = (voice - 1) * LOOP_LENGTH
-
   print("recording layer "..voice)
 
-  softcut.position(voice,start_pos)
+  softcut.position(voice, (voice - 1) * LOOP_LENGTH)
 
-  softcut.level(voice,1.0)
+  softcut.level(voice, 1.0)
+  softcut.rec_level(voice, 1.0)
+  softcut.pre_level(voice, 0.0)
 
-  softcut.rec_level(voice,1.0)
-
-  softcut.pre_level(voice,0.0)
-
-  softcut.rec(voice,1)
+  softcut.rec(voice, 1)
 
   layers[1].active = true
+
+  apply_archeology()
 
 end
 
@@ -194,26 +209,25 @@ function finalize_layer()
 
   print("finalize layer "..voice)
 
-  softcut.rec(voice,0)
+  softcut.rec(voice, 0)
 
-  softcut.pre_level(voice,1.0)
-
-  softcut.level(voice,1.0)
+  softcut.pre_level(voice, 1.0)
 
 end
+
 function rotate_layers()
 
-  local temp_voice = layers[3].voice
+  local temp_voice = layers[NUM_LAYERS].voice
 
-  layers[3].voice = layers[2].voice
-  layers[2].voice = layers[1].voice
+  for i = NUM_LAYERS, 2, -1 do
+    layers[i].voice = layers[i-1].voice
+    layers[i].active = layers[i-1].active
+  end
+
   layers[1].voice = temp_voice
-
-  layers[3].active = layers[2].active
-  layers[2].active = layers[1].active
   layers[1].active = false
 
-  apply_mix()
+  apply_archeology()
 
 end
 
@@ -231,36 +245,50 @@ function remove_top_layer()
 
     silence_time = 0
 
-    apply_mix()
+    apply_archeology()
 
   end
 
 end
 
 ------------------------------------------------
--- MIX
+-- ARCHEOLOGY ENGINE
 ------------------------------------------------
 
-function apply_mix()
+function apply_archeology()
 
-  for i = 1,3 do
+  for i = 1, NUM_LAYERS do
 
     local voice = layers[i].voice
 
     if layers[i].active then
 
-      if i == 1 then
-        softcut.level(voice,1.0)
-      elseif i == 2 then
-        softcut.level(voice,0.6)
+      local depth = i
+
+      -- base attenuation
+      local gain = 1.0 - ((depth - 1) * 0.18)
+
+      -- clamp
+      if gain < 0 then gain = 0 end
+
+      softcut.level(voice, gain)
+
+      -- degradation by depth
+      local cutoff = 1.0 - ((depth - 1) * 0.15)
+      if cutoff < 0.2 then cutoff = 0.2 end
+
+      softcut.post_filter_fc(voice, cutoff * 8000)
+      softcut.post_filter_rq(voice, 0.8)
+
+      -- subtle drift in deep layers
+      if depth >= 4 then
+        softcut.rate(voice, 0.995 + math.random() * 0.01)
       else
-        softcut.level(voice,0.3)
+        softcut.rate(voice, 1.0)
       end
 
     else
-
-      softcut.level(voice,0)
-
+      softcut.level(voice, 0)
     end
 
   end
@@ -276,16 +304,22 @@ function redraw()
   screen.clear()
 
   screen.move(10,20)
-  screen.text("MEMORY PHYSICS")
+  screen.text("ARCHEOLOGY MODE")
 
   screen.move(10,35)
   screen.text("IN "..string.format("%.3f",input_level))
 
   screen.move(10,45)
-  screen.text("TH "..string.format("%.3f",threshold))
+  screen.text("SM "..string.format("%.3f",smoothed_level))
 
   screen.move(10,55)
-  screen.text("SIL "..string.format("%.1f",silence_time))
+  screen.text("TH "..string.format("%.3f",threshold))
+
+  screen.move(10,65)
+  screen.text("S "..string.format("%.1f",silence_time))
+
+  screen.move(10,75)
+  screen.text("layers: 5")
 
   screen.update()
 
@@ -307,7 +341,7 @@ end
 function enc(n,d)
 
   if n == 2 then
-    params:delta("threshold",d)
+    params:delta("threshold", d)
   end
 
 end
