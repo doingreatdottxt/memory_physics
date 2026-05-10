@@ -1,6 +1,6 @@
 -- memory_physics.lua
 -- Archeology Mode Alpha
--- dynamic excavation pressure + loop crossfade
+-- timeout-tail trimming + loop crossfade
 
 engine.name = "None"
 
@@ -64,6 +64,13 @@ local burial_release_progress = 0
 local LOOP_FADE_TIME = 0.12
 
 ------------------------------------------------
+-- RECORD POSITION TRACKING
+------------------------------------------------
+
+local record_start_time = 0
+local record_duration = 0
+
+------------------------------------------------
 -- ENVIRONMENT
 ------------------------------------------------
 
@@ -82,7 +89,8 @@ function init()
     layers[i] = {
       voice = i,
       active = false,
-      dropout = false
+      dropout = false,
+      loop_end = LOOP_LENGTH
     }
 
   end
@@ -135,10 +143,6 @@ function setup_softcut()
 
     softcut.pre_level(i,0.0)
 
-    ------------------------------------------------
-    -- LOOP CROSSFADE
-    ------------------------------------------------
-
     softcut.fade_time(i, LOOP_FADE_TIME)
 
     softcut.level_input_cut(1, i, 1.0)
@@ -167,10 +171,6 @@ function setup_params()
     threshold = x
   end)
 
-  ------------------------------------------------
-  -- ACTIVE LAYERS
-  ------------------------------------------------
-
   params:add_number(
     "active_layers",
     "active layers",
@@ -184,10 +184,6 @@ function setup_params()
     ACTIVE_LAYERS = x
 
   end)
-
-  ------------------------------------------------
-  -- LOOP FADE
-  ------------------------------------------------
 
   params:add{
     type = "control",
@@ -242,6 +238,7 @@ function monitor_input()
     if smoothed_level > threshold then
 
       silence_time = 0
+
       active_time = active_time + 0.05
 
       if not recording and can_trigger
@@ -307,7 +304,14 @@ function begin_new_layer()
   local start_pos =
     (new_voice - 1) * LOOP_LENGTH
 
-  softcut.position(new_voice, start_pos)
+  ------------------------------------------------
+  -- RESET LOOP WINDOW
+  ------------------------------------------------
+
+  softcut.loop_start(new_voice,start_pos)
+  softcut.loop_end(new_voice,start_pos + LOOP_LENGTH)
+
+  softcut.position(new_voice,start_pos)
 
   softcut.level(new_voice, 1.0)
 
@@ -319,12 +323,15 @@ function begin_new_layer()
 
   softcut.rec(new_voice,1)
 
+  ------------------------------------------------
+  -- RECORD TIMING
+  ------------------------------------------------
+
+  record_start_time = util.time()
+
   layers[MAX_LAYERS].active = true
   layers[MAX_LAYERS].dropout = false
-
-  ------------------------------------------------
-  -- EXCAVATION PRESSURE BUILDS
-  ------------------------------------------------
+  layers[MAX_LAYERS].loop_end = LOOP_LENGTH
 
   excavation_pressure =
     math.min(1.0, excavation_pressure + 0.08)
@@ -344,6 +351,48 @@ function finalize_layer()
   softcut.rec(voice,0)
 
   softcut.pre_level(voice,1.0)
+
+  ------------------------------------------------
+  -- CALCULATE TRUE LOOP LENGTH
+  ------------------------------------------------
+
+  record_duration =
+    util.time() - record_start_time
+
+  ------------------------------------------------
+  -- REMOVE SILENCE TAIL
+  ------------------------------------------------
+
+  local trimmed_length =
+    math.max(
+      0.25,
+      record_duration - NEW_LAYER_TIMEOUT
+    )
+
+  ------------------------------------------------
+  -- LIMIT LOOP LENGTH
+  ------------------------------------------------
+
+  trimmed_length =
+    math.min(trimmed_length, LOOP_LENGTH)
+
+  local start_pos =
+    (voice - 1) * LOOP_LENGTH
+
+  local end_pos =
+    start_pos + trimmed_length
+
+  ------------------------------------------------
+  -- APPLY NEW LOOP WINDOW
+  ------------------------------------------------
+
+  softcut.loop_start(voice,start_pos)
+  softcut.loop_end(voice,end_pos)
+
+  layers[MAX_LAYERS].loop_end =
+    trimmed_length
+
+  print("trimmed loop "..trimmed_length)
 
   commit_burial()
 
@@ -392,7 +441,8 @@ function commit_burial()
   local temp = {
     voice = layers[MAX_LAYERS].voice,
     active = layers[MAX_LAYERS].active,
-    dropout = layers[MAX_LAYERS].dropout
+    dropout = layers[MAX_LAYERS].dropout,
+    loop_end = layers[MAX_LAYERS].loop_end
   }
 
   for i = MAX_LAYERS, 2, -1 do
@@ -400,12 +450,14 @@ function commit_burial()
     layers[i].voice = layers[i-1].voice
     layers[i].active = layers[i-1].active
     layers[i].dropout = layers[i-1].dropout
+    layers[i].loop_end = layers[i-1].loop_end
 
   end
 
   layers[1].voice = temp.voice
   layers[1].active = temp.active
   layers[1].dropout = temp.dropout
+  layers[1].loop_end = temp.loop_end
 
 end
 
@@ -430,18 +482,16 @@ function collapse_memory_stack()
     layers[i].voice = layers[i+1].voice
     layers[i].active = layers[i+1].active
     layers[i].dropout = layers[i+1].dropout
+    layers[i].loop_end = layers[i+1].loop_end
 
   end
 
   layers[MAX_LAYERS].voice = removed_voice
   layers[MAX_LAYERS].active = false
   layers[MAX_LAYERS].dropout = false
+  layers[MAX_LAYERS].loop_end = LOOP_LENGTH
 
   silence_time = 0
-
-  ------------------------------------------------
-  -- PRESSURE RELEASES
-  ------------------------------------------------
 
   excavation_pressure =
     math.max(0, excavation_pressure - 0.12)
@@ -504,10 +554,6 @@ function apply_archeology()
       local cutoff = env.cutoffs[i] or 250
 
       local drift = env.drifts[i] or 0.05
-
-      ------------------------------------------------
-      -- EXCAVATION PRESSURE
-      ------------------------------------------------
 
       gain =
         gain * (1.0 - (excavation_pressure * (i * 0.06)))
