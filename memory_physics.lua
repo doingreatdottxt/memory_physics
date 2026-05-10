@@ -69,6 +69,17 @@ local burial_crossfade_progress = 0
 local burial_crossfade_duration = 0
 
 ------------------------------------------------
+-- COLLAPSE STATE
+------------------------------------------------
+
+local collapse_crossfade = false
+local collapse_crossfade_progress = 0
+local collapse_source_voice = nil
+local collapse_target_voice = nil
+
+local COLLAPSE_CROSSFADE_TIME = 4.0
+
+------------------------------------------------
 -- LOOP CROSSFADE
 ------------------------------------------------
 
@@ -114,6 +125,7 @@ function init()
   clock.run(redraw_clock)
   clock.run(archeology_decay_clock)
   clock.run(burial_crossfade_clock)
+  clock.run(collapse_crossfade_clock)
 
 end
 
@@ -286,7 +298,7 @@ function monitor_input()
 
         if silence_time > REMOVE_LAYER_TIMEOUT then
 
-          collapse_memory_stack()
+          begin_collapse_sequence()
 
         end
 
@@ -319,7 +331,7 @@ function monitor_input()
 
       if silence_time > REMOVE_LAYER_TIMEOUT then
 
-        collapse_memory_stack()
+        begin_collapse_sequence()
 
       end
 
@@ -553,6 +565,98 @@ function burial_crossfade_clock()
 end
 
 ------------------------------------------------
+-- COLLAPSE SEQUENCE
+------------------------------------------------
+
+function begin_collapse_sequence()
+
+  if not layers[1].active then
+    return
+  end
+
+  print("memory collapse beginning")
+
+  collapse_source_voice = layers[1].voice
+  collapse_target_voice = layers[2].voice
+
+  collapse_crossfade = true
+  collapse_crossfade_progress = 0
+
+  silence_time = 0
+
+end
+
+------------------------------------------------
+-- COLLAPSE CROSSFADE
+------------------------------------------------
+
+function update_collapse_crossfade()
+
+  if not collapse_crossfade then
+    return
+  end
+
+  collapse_crossfade_progress =
+    collapse_crossfade_progress + 0.05 / COLLAPSE_CROSSFADE_TIME
+
+  if collapse_crossfade_progress >= 1 then
+
+    collapse_crossfade = false
+    collapse_crossfade_progress = 1
+
+    finalize_collapse()
+
+  end
+
+  apply_archeology()
+
+end
+
+function finalize_collapse()
+
+  print("memory collapse finalized")
+
+  local removed_voice = layers[1].voice
+
+  softcut.level(removed_voice, 0)
+
+  for i = 1, MAX_LAYERS - 1 do
+
+    layers[i].voice = layers[i+1].voice
+    layers[i].active = layers[i+1].active
+    layers[i].dropout = layers[i+1].dropout
+    layers[i].loop_end = layers[i+1].loop_end
+
+  end
+
+  layers[MAX_LAYERS].voice = removed_voice
+  layers[MAX_LAYERS].active = false
+  layers[MAX_LAYERS].dropout = false
+  layers[MAX_LAYERS].loop_end = MAX_LOOP_LENGTH
+
+  excavation_pressure =
+    math.max(0, excavation_pressure - 0.12)
+
+  collapse_source_voice = nil
+  collapse_target_voice = nil
+
+  apply_archeology()
+
+end
+
+function collapse_crossfade_clock()
+
+  while true do
+
+    clock.sleep(0.05)
+
+    update_collapse_crossfade()
+
+  end
+
+end
+
+------------------------------------------------
 -- COMMIT BURIAL
 ------------------------------------------------
 
@@ -578,45 +682,6 @@ function commit_burial()
   layers[1].active = temp.active
   layers[1].dropout = temp.dropout
   layers[1].loop_end = temp.loop_end
-
-end
-
-------------------------------------------------
--- COLLAPSE
-------------------------------------------------
-
-function collapse_memory_stack()
-
-  if not layers[1].active then
-    return
-  end
-
-  print("memory collapse")
-
-  local removed_voice = layers[1].voice
-
-  softcut.level(removed_voice,0)
-
-  for i = 1, MAX_LAYERS - 1 do
-
-    layers[i].voice = layers[i+1].voice
-    layers[i].active = layers[i+1].active
-    layers[i].dropout = layers[i+1].dropout
-    layers[i].loop_end = layers[i+1].loop_end
-
-  end
-
-  layers[MAX_LAYERS].voice = removed_voice
-  layers[MAX_LAYERS].active = false
-  layers[MAX_LAYERS].dropout = false
-  layers[MAX_LAYERS].loop_end = MAX_LOOP_LENGTH
-
-  silence_time = 0
-
-  excavation_pressure =
-    math.max(0, excavation_pressure - 0.12)
-
-  apply_archeology()
 
 end
 
@@ -719,6 +784,74 @@ function apply_archeology()
         softcut.rate(voice, 1.0)
 
       ------------------------------------------------
+      -- COLLAPSE CROSSFADE
+      ------------------------------------------------
+
+      elseif collapse_crossfade then
+
+        local progress = collapse_crossfade_progress
+
+        if voice == collapse_source_voice then
+
+          -- fading out: collapse_source_voice at layer 1
+          local layer1_gain = env.gains[1] or 1.0
+          local layer1_cutoff = env.cutoffs[1] or 12000
+
+          local faded_gain =
+            layer1_gain * (1.0 - progress)
+
+          local faded_cutoff =
+            layer1_cutoff * (1.0 - progress) + (env.cutoffs[2] or 6500) * progress
+
+          softcut.level(voice, faded_gain)
+
+          softcut.post_filter_fc(voice, faded_cutoff)
+
+          softcut.rate(voice, 1.0)
+
+        elseif voice == collapse_target_voice then
+
+          -- fading in: collapse_target_voice from layer 2 to layer 1
+          local layer1_gain = env.gains[1] or 1.0
+          local layer1_cutoff = env.cutoffs[1] or 12000
+          local layer2_gain = env.gains[2] or 0.7
+          local layer2_cutoff = env.cutoffs[2] or 6500
+
+          local faded_gain =
+            layer2_gain * (1.0 - progress) + (layer1_gain * progress)
+
+          local faded_cutoff =
+            layer2_cutoff * (1.0 - progress) + (layer1_cutoff * progress)
+
+          softcut.level(voice, faded_gain)
+
+          softcut.post_filter_fc(voice, faded_cutoff)
+
+          softcut.rate(voice, 1.0)
+
+        else
+
+          -- normal playback for other layers
+          if layers[i].dropout then
+            gain = gain * 0.15
+          end
+
+          softcut.level(voice,gain)
+
+          softcut.post_filter_fc(voice,cutoff)
+
+          softcut.post_filter_rq(voice,1.8)
+
+          local rate =
+            1.0 +
+            ((math.random() * drift)
+            - (drift / 2))
+
+          softcut.rate(voice,rate)
+
+        end
+
+      ------------------------------------------------
       -- NORMAL PLAYBACK
       ------------------------------------------------
 
@@ -764,7 +897,7 @@ function archeology_decay_clock()
 
   while true do
 
-    if not burial_active then
+    if not burial_active and not collapse_crossfade then
 
       for i = 4, ACTIVE_LAYERS do
 
