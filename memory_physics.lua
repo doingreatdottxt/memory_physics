@@ -15,9 +15,9 @@ local active_time = 0
 
 local recording = false
 
-local NEW_LAYER_TIMEOUT = 2
-local REMOVE_LAYER_TIMEOUT = 10
-local MIN_PHRASE_GAP = 1.5
+local NEW_LAYER_TIMEOUT = 1
+local REMOVE_LAYER_TIMEOUT = 16
+local MIN_PHRASE_GAP = .1
 
 local LOOP_LENGTH = 8
 local NUM_LAYERS = 5
