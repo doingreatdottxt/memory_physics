@@ -1,5 +1,5 @@
 -- memory_physics.lua
--- Archeology Mode (stratigraphic bleed version)
+-- Archeology Mode (transitional burial alpha)
 
 engine.name = "None"
 
@@ -25,6 +25,11 @@ local NUM_LAYERS = 5
 local layers = {}
 
 local can_trigger = true
+
+-- transitional burial state
+local burial_active = false
+local burial_progress = 0
+local burial_source_voice = nil
 
 ------------------------------------------------
 -- INIT
@@ -155,6 +160,10 @@ function monitor_input()
       silence_time = 0
       active_time = active_time + 0.05
 
+      if recording then
+        update_burial_progress()
+      end
+
       if not recording and can_trigger and active_time > MIN_PHRASE_GAP then
         begin_new_layer()
         can_trigger = false
@@ -190,28 +199,36 @@ function begin_new_layer()
 
   recording = true
 
-  bury_layers()
+  burial_active = true
+  burial_progress = 0
 
-  local voice = layers[1].voice
+  -- preserve current top layer for gradual burial
+  if layers[1].active then
+    burial_source_voice = layers[1].voice
+  else
+    burial_source_voice = nil
+  end
 
-  print("recording layer "..voice)
+  local new_voice = layers[NUM_LAYERS].voice
 
-  softcut.position(voice, (voice - 1) * LOOP_LENGTH)
+  print("recording layer "..new_voice)
 
-  softcut.level(voice,1.0)
+  local start_pos = (new_voice - 1) * LOOP_LENGTH
 
-  softcut.rate(voice,1.0)
+  softcut.position(new_voice, start_pos)
 
-  softcut.rec_level(voice,1.0)
+  softcut.level(new_voice, 0)
 
-  softcut.pre_level(voice,0.0)
+  softcut.rate(new_voice,1.0)
 
-  softcut.rec(voice,1)
+  softcut.rec_level(new_voice,1.0)
 
-  layers[1].active = true
-  layers[1].dropout = false
+  softcut.pre_level(new_voice,0.0)
 
-  apply_archeology()
+  softcut.rec(new_voice,1)
+
+  layers[NUM_LAYERS].active = true
+  layers[NUM_LAYERS].dropout = false
 
 end
 
@@ -219,7 +236,7 @@ function finalize_layer()
 
   recording = false
 
-  local voice = layers[1].voice
+  local voice = layers[NUM_LAYERS].voice
 
   print("finalize layer "..voice)
 
@@ -227,29 +244,45 @@ function finalize_layer()
 
   softcut.pre_level(voice,1.0)
 
+  commit_burial()
+
+  burial_active = false
+  burial_progress = 0
+  burial_source_voice = nil
+
   apply_archeology()
 
 end
 
 ------------------------------------------------
--- BURIAL
+-- TRANSITIONAL BURIAL
 ------------------------------------------------
 
-function bury_layers()
+function update_burial_progress()
 
-  local temp_voice = layers[NUM_LAYERS].voice
-
-  for i = NUM_LAYERS, 2, -1 do
-
-    layers[i].voice = layers[i-1].voice
-    layers[i].active = layers[i-1].active
-    layers[i].dropout = layers[i-1].dropout
-
+  if not burial_active then
+    return
   end
 
-  layers[1].voice = temp_voice
-  layers[1].active = false
-  layers[1].dropout = false
+  burial_progress = burial_progress + 0.01
+
+  if burial_progress > 1 then
+    burial_progress = 1
+  end
+
+  apply_archeology()
+
+end
+
+function commit_burial()
+
+  local temp = layers[NUM_LAYERS]
+
+  for i = NUM_LAYERS, 2, -1 do
+    layers[i] = layers[i-1]
+  end
+
+  layers[1] = temp
 
 end
 
@@ -301,24 +334,65 @@ function apply_archeology()
 
       local depth = i
 
+      local gain_table = {
+        1.0,
+        0.65,
+        0.38,
+        0.18,
+        0.07
+      }
+
+      local cutoff_table = {
+        12000,
+        5000,
+        2200,
+        900,
+        250
+      }
+
+      local drift_table = {
+        0.0,
+        0.004,
+        0.012,
+        0.03,
+        0.08
+      }
+
+      local gain = gain_table[depth]
+
       ------------------------------------------------
-      -- SPECIAL RECORDING VISIBILITY RULE
+      -- TRANSITIONAL BURIAL BEHAVIOR
       ------------------------------------------------
 
-      if recording then
+      if burial_active then
 
-        if i == 1 then
+        local incoming_voice = layers[NUM_LAYERS].voice
 
-          softcut.level(voice,1.0)
+        -- new layer gradually emerges
+        if voice == incoming_voice then
 
-        elseif i == 2 then
+          gain = burial_progress
 
-          -- visible buried structure
-          softcut.level(voice,0.12)
+          softcut.level(voice, gain)
 
-          softcut.post_filter_fc(voice,700)
+          softcut.post_filter_fc(voice, 12000)
 
-          softcut.rate(voice,0.985)
+          softcut.rate(voice,1.0)
+
+        -- previous surface gradually sinks
+        elseif voice == burial_source_voice then
+
+          local sink_gain = 1.0 - (burial_progress * 0.88)
+
+          softcut.level(voice, sink_gain)
+
+          local cutoff = 12000 - (burial_progress * 10500)
+
+          softcut.post_filter_fc(voice, cutoff)
+
+          local rate = 1.0 - (burial_progress * 0.015)
+
+          softcut.rate(voice, rate)
 
         else
 
@@ -333,41 +407,15 @@ function apply_archeology()
         -- NORMAL PLAYBACK DEGRADATION
         ------------------------------------------------
 
-        local gain_table = {
-          1.0,
-          0.65,
-          0.38,
-          0.18,
-          0.07
-        }
-
-        local gain = gain_table[depth]
-
         if layers[i].dropout then
           gain = gain * 0.15
         end
 
         softcut.level(voice, gain)
 
-        local cutoff_table = {
-          12000,
-          5000,
-          2200,
-          900,
-          250
-        }
-
         softcut.post_filter_fc(voice, cutoff_table[depth])
 
         softcut.post_filter_rq(voice, 1.8)
-
-        local drift_table = {
-          0.0,
-          0.004,
-          0.012,
-          0.03,
-          0.08
-        }
 
         local drift = drift_table[depth]
 
@@ -395,27 +443,31 @@ function archeology_decay_clock()
 
   while true do
 
-    for i = 4, NUM_LAYERS do
+    if not burial_active then
 
-      if layers[i].active then
+      for i = 4, NUM_LAYERS do
 
-        local chance = 0
+        if layers[i].active then
 
-        if i == 4 then
-          chance = 0.2
-        elseif i == 5 then
-          chance = 0.45
-        end
+          local chance = 0
 
-        if math.random() < chance then
-          layers[i].dropout = not layers[i].dropout
+          if i == 4 then
+            chance = 0.2
+          elseif i == 5 then
+            chance = 0.45
+          end
+
+          if math.random() < chance then
+            layers[i].dropout = not layers[i].dropout
+          end
+
         end
 
       end
 
-    end
+      apply_archeology()
 
-    apply_archeology()
+    end
 
     clock.sleep(0.6)
 
@@ -438,16 +490,18 @@ function redraw()
   screen.text("IN "..string.format("%.3f",input_level))
 
   screen.move(10,40)
-  screen.text("SM "..string.format("%.3f",smoothed_level))
-
-  screen.move(10,50)
   screen.text("TH "..string.format("%.3f",threshold))
 
-  screen.move(10,60)
+  screen.move(10,50)
   screen.text("S "..string.format("%.1f",silence_time))
 
-  screen.move(10,70)
-  screen.text("STRATIGRAPHIC")
+  screen.move(10,60)
+
+  if burial_active then
+    screen.text("BURIAL "..string.format("%.2f",burial_progress))
+  else
+    screen.text("EXCAVATION STABLE")
+  end
 
   screen.update()
 
