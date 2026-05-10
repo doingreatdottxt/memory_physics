@@ -35,7 +35,7 @@ local manual_recording = false
 ------------------------------------------------
 
 local NEW_LAYER_TIMEOUT = 1
-local REMOVE_LAYER_TIMEOUT = 16
+local REMOVE_LAYER_TIMEOUT = 12
 local MIN_PHRASE_GAP = 0.1
 
 ------------------------------------------------
@@ -97,6 +97,21 @@ local record_duration = 0
 ------------------------------------------------
 
 local environment = "desert"
+
+local ENVIRONMENTS = {"desert", "forest", "river_bank", "deep_sea", "swamp"}
+local environment_index = 1
+
+------------------------------------------------
+-- KEY STATE
+------------------------------------------------
+
+local k1_held = false
+
+------------------------------------------------
+-- MASTER VOLUME
+------------------------------------------------
+
+local master_volume = 1.0
 
 ------------------------------------------------
 -- INIT
@@ -197,15 +212,15 @@ function setup_params()
 
   params:add_number(
     "active_layers",
-    "active layers",
+    "max layers",
     3,
-    MAX_LAYERS,
-    5
+    8,
+    6
   )
 
   params:set_action("active_layers", function(x)
 
-    ACTIVE_LAYERS = x
+    MAX_LAYERS = x
 
   end)
 
@@ -224,6 +239,18 @@ function setup_params()
       softcut.fade_time(i, LOOP_FADE_TIME)
     end
 
+  end)
+
+  params:add{
+    type = "control",
+    id = "master_volume",
+    name = "master volume",
+    controlspec = controlspec.new(0.0, 1.0, 'lin', 0, 1.0)
+  }
+
+  params:set_action("master_volume", function(x)
+    master_volume = x
+    audio.level_cut(master_volume)
   end)
 
 end
@@ -707,6 +734,30 @@ function get_environment_tables()
       drifts = {0,0.006,0.012,0.022,0.04,0.07}
     }
 
+  elseif environment == "river_bank" then
+
+    return {
+      gains = {1.0,0.75,0.5,0.3,0.15,0.07},
+      cutoffs = {10000,5500,2800,1400,700,350},
+      drifts = {0,0.004,0.01,0.018,0.035,0.06}
+    }
+
+  elseif environment == "deep_sea" then
+
+    return {
+      gains = {1.0,0.6,0.3,0.12,0.05,0.02},
+      cutoffs = {8000,3500,1500,700,300,100},
+      drifts = {0,0.002,0.005,0.01,0.02,0.04}
+    }
+
+  elseif environment == "swamp" then
+
+    return {
+      gains = {1.0,0.65,0.4,0.2,0.1,0.04},
+      cutoffs = {7000,3500,1800,900,450,200},
+      drifts = {0,0.008,0.015,0.025,0.04,0.08}
+    }
+
   else
 
     return {
@@ -941,12 +992,12 @@ function redraw()
 
   screen.move(10,28)
   screen.text(
-    "MODE "..record_mode
+    "MODE "..record_mode:upper()
   )
 
   screen.move(10,40)
   screen.text(
-    "LAYERS "..ACTIVE_LAYERS
+    "ENV "..environment:upper()
   )
 
   screen.move(10,52)
@@ -961,15 +1012,15 @@ function redraw()
 
   else
 
-    screen.text(environment)
+    screen.text("IDLE")
 
   end
 
   screen.move(10,64)
 
   screen.text(
-    "PRESS "..string.format("%.2f",
-    excavation_pressure)
+    "TIMEOUT "..string.format("%.1f",
+    REMOVE_LAYER_TIMEOUT).."s"
   )
 
   screen.update()
@@ -995,10 +1046,19 @@ end
 function key(n,z)
 
   ------------------------------------------------
-  -- K2 = RECORD MODE TOGGLE
+  -- K1 STATE TRACKING
   ------------------------------------------------
 
-  if n == 2 and z == 1 then
+  if n == 1 then
+    k1_held = (z == 1)
+    return
+  end
+
+  ------------------------------------------------
+  -- K1 + K2 = TOGGLE AUTO/MANUAL MODE
+  ------------------------------------------------
+
+  if k1_held and n == 2 and z == 1 then
 
     if record_mode == "auto" then
       record_mode = "manual"
@@ -1007,16 +1067,90 @@ function key(n,z)
     end
 
     print("mode "..record_mode)
+    return
 
   end
 
   ------------------------------------------------
-  -- K3 = ARM / STOP
+  -- K1 + K3 = CYCLE ENVIRONMENTS
   ------------------------------------------------
 
-  if n == 3 and z == 1 then
+  if k1_held and n == 3 and z == 1 then
 
-    manual_record_control()
+    environment_index = environment_index + 1
+
+    if environment_index > #ENVIRONMENTS then
+      environment_index = 1
+    end
+
+    environment = ENVIRONMENTS[environment_index]
+
+    print("environment "..environment)
+    return
+
+  end
+
+  ------------------------------------------------
+  -- AUTO MODE
+  ------------------------------------------------
+
+  if record_mode == "auto" then
+
+    ------------------------------------------------
+    -- K2 = END RECORDING
+    ------------------------------------------------
+
+    if n == 2 and z == 1 then
+
+      if recording then
+        finalize_layer()
+        print("manual end recording")
+      end
+
+      return
+
+    end
+
+    ------------------------------------------------
+    -- K3 = TRIGGER COLLAPSE
+    ------------------------------------------------
+
+    if n == 3 and z == 1 then
+
+      begin_collapse_sequence()
+      return
+
+    end
+
+  end
+
+  ------------------------------------------------
+  -- MANUAL MODE
+  ------------------------------------------------
+
+  if record_mode == "manual" then
+
+    ------------------------------------------------
+    -- K2 = BEGIN / END RECORDING
+    ------------------------------------------------
+
+    if n == 2 and z == 1 then
+
+      manual_record_control()
+      return
+
+    end
+
+    ------------------------------------------------
+    -- K3 = TRIGGER COLLAPSE
+    ------------------------------------------------
+
+    if n == 3 and z == 1 then
+
+      begin_collapse_sequence()
+      return
+
+    end
 
   end
 
@@ -1028,13 +1162,38 @@ end
 
 function enc(n,d)
 
-  if n == 2 then
+  ------------------------------------------------
+  -- ENC 1 = EXCAVATION PRESSURE
+  ------------------------------------------------
 
-    params:delta("threshold", d)
+  if n == 1 then
+
+    excavation_pressure = util.clamp(excavation_pressure + (d * 0.05), 0, 1.0)
+    apply_archeology()
+
+  ------------------------------------------------
+  -- ENC 2 = LAYER TIMEOUT LENGTH (1-30s, default 12s)
+  ------------------------------------------------
+
+  elseif n == 2 then
+
+    REMOVE_LAYER_TIMEOUT = util.clamp(REMOVE_LAYER_TIMEOUT + d, 1, 30)
+
+  ------------------------------------------------
+  -- ENC 3 = MAX LAYERS (3-8)
+  ------------------------------------------------
 
   elseif n == 3 then
 
-    params:delta("active_layers", d)
+    MAX_LAYERS = util.clamp(MAX_LAYERS + d, 3, 8)
+
+  ------------------------------------------------
+  -- ENC 4 = MASTER VOLUME
+  ------------------------------------------------
+
+  elseif n == 4 then
+
+    params:delta("master_volume", d)
 
   end
 
