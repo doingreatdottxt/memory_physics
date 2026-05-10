@@ -202,7 +202,7 @@ function setup_params()
   params:add{
     type = "control",
     id = "threshold",
-    name = "threshold",
+    name = "thresh",
     controlspec = controlspec.new(0.001,0.2,'lin',0,0.02)
   }
 
@@ -227,7 +227,7 @@ function setup_params()
   params:add{
     type = "control",
     id = "loop_fade",
-    name = "loop fade",
+    name = "fade",
     controlspec = controlspec.new(0.01,1.0,'lin',0,0.12,"s")
   }
 
@@ -244,7 +244,7 @@ function setup_params()
   params:add{
     type = "control",
     id = "master_volume",
-    name = "master volume",
+    name = "vol",
     controlspec = controlspec.new(0.0, 1.0, 'lin', 0, 1.0)
   }
 
@@ -791,11 +791,14 @@ function apply_archeology()
 
       local drift = env.drifts[i] or 0.05
 
+      -- Pressure effects 200% stronger on highest levels
+      local pressure_factor = 1.0 + (5 - i) * 0.2
+      
       gain =
-        gain * (1.0 - (excavation_pressure * (i * 0.06)))
+        gain * (1.0 - (excavation_pressure * (i * 0.06) * pressure_factor))
 
       cutoff =
-        cutoff * (1.0 - (excavation_pressure * 0.35))
+        cutoff * (1.0 - (excavation_pressure * 0.35 * pressure_factor))
 
       ------------------------------------------------
       -- ACTIVE RECORDING
@@ -986,9 +989,6 @@ end
 function redraw()
 
   screen.clear()
-
-  screen.move(10,15)
-  screen.text("ARCHEOLOGY")
 
   screen.move(10,28)
   screen.text(
