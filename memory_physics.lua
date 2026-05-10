@@ -1,5 +1,5 @@
 -- memory_physics.lua
--- Archeology Mode (true resurfacing)
+-- Archeology Mode (stratigraphic bleed version)
 
 engine.name = "None"
 
@@ -87,12 +87,15 @@ function setup_softcut()
     softcut.rec(i,0)
 
     softcut.rec_level(i,1.0)
+
     softcut.pre_level(i,0.0)
 
     softcut.fade_time(i,0.05)
 
     softcut.level_input_cut(1, i, 1.0)
     softcut.level_input_cut(2, i, 1.0)
+
+    softcut.level_cut_cut(i, i, 0)
 
   end
 
@@ -180,7 +183,7 @@ function monitor_input()
 end
 
 ------------------------------------------------
--- LAYER CONTROL
+-- RECORDING CONTROL
 ------------------------------------------------
 
 function begin_new_layer()
@@ -200,6 +203,7 @@ function begin_new_layer()
   softcut.rate(voice,1.0)
 
   softcut.rec_level(voice,1.0)
+
   softcut.pre_level(voice,0.0)
 
   softcut.rec(voice,1)
@@ -222,6 +226,8 @@ function finalize_layer()
   softcut.rec(voice,0)
 
   softcut.pre_level(voice,1.0)
+
+  apply_archeology()
 
 end
 
@@ -296,70 +302,80 @@ function apply_archeology()
       local depth = i
 
       ------------------------------------------------
-      -- GAIN LOSS
+      -- SPECIAL RECORDING VISIBILITY RULE
       ------------------------------------------------
 
-      local gain_table = {
-        1.0,
-        0.65,
-        0.38,
-        0.18,
-        0.07
-      }
+      if recording then
 
-      local gain = gain_table[depth]
+        if i == 1 then
 
-      if layers[i].dropout then
-        gain = gain * 0.15
+          softcut.level(voice,1.0)
+
+        elseif i == 2 then
+
+          -- visible buried structure
+          softcut.level(voice,0.12)
+
+          softcut.post_filter_fc(voice,700)
+
+          softcut.rate(voice,0.985)
+
+        else
+
+          -- deeper layers dormant during excavation
+          softcut.level(voice,0)
+
+        end
+
+      else
+
+        ------------------------------------------------
+        -- NORMAL PLAYBACK DEGRADATION
+        ------------------------------------------------
+
+        local gain_table = {
+          1.0,
+          0.65,
+          0.38,
+          0.18,
+          0.07
+        }
+
+        local gain = gain_table[depth]
+
+        if layers[i].dropout then
+          gain = gain * 0.15
+        end
+
+        softcut.level(voice, gain)
+
+        local cutoff_table = {
+          12000,
+          5000,
+          2200,
+          900,
+          250
+        }
+
+        softcut.post_filter_fc(voice, cutoff_table[depth])
+
+        softcut.post_filter_rq(voice, 1.8)
+
+        local drift_table = {
+          0.0,
+          0.004,
+          0.012,
+          0.03,
+          0.08
+        }
+
+        local drift = drift_table[depth]
+
+        local rate = 1.0 + ((math.random() * drift) - (drift / 2))
+
+        softcut.rate(voice, rate)
+
       end
-
-      softcut.level(voice, gain)
-
-      ------------------------------------------------
-      -- FILTER DECAY
-      ------------------------------------------------
-
-      local cutoff_table = {
-        12000,
-        5000,
-        2200,
-        900,
-        250
-      }
-
-      softcut.post_filter_fc(voice, cutoff_table[depth])
-
-      softcut.post_filter_rq(voice, 1.8)
-
-      ------------------------------------------------
-      -- PLAYBACK INSTABILITY
-      ------------------------------------------------
-
-      local drift_table = {
-        0.0,
-        0.004,
-        0.012,
-        0.03,
-        0.08
-      }
-
-      local drift = drift_table[depth]
-
-      local rate = 1.0 + ((math.random() * drift) - (drift / 2))
-
-      softcut.rate(voice, rate)
-
-      ------------------------------------------------
-      -- STEREO COLLAPSE
-      ------------------------------------------------
-
-      local pan_amount = 0
-
-      if depth >= 4 then
-        pan_amount = (-0.05 + math.random() * 0.1)
-      end
-
-      softcut.pan(voice, pan_amount)
 
     else
 
@@ -431,7 +447,7 @@ function redraw()
   screen.text("S "..string.format("%.1f",silence_time))
 
   screen.move(10,70)
-  screen.text("5 LAYERS")
+  screen.text("STRATIGRAPHIC")
 
   screen.update()
 
