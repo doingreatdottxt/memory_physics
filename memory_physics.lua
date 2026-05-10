@@ -64,8 +64,9 @@ local excavation_pressure = 0
 local burial_active = false
 local burial_source_voice = nil
 
-local burial_release = false
-local burial_release_progress = 0
+local burial_crossfade = false
+local burial_crossfade_progress = 0
+local burial_crossfade_duration = 0
 
 ------------------------------------------------
 -- LOOP CROSSFADE
@@ -112,6 +113,7 @@ function init()
   clock.run(monitor_input)
   clock.run(redraw_clock)
   clock.run(archeology_decay_clock)
+  clock.run(burial_crossfade_clock)
 
 end
 
@@ -323,8 +325,6 @@ function monitor_input()
 
     end
 
-    update_burial_release()
-
     clock.sleep(0.05)
 
   end
@@ -459,8 +459,15 @@ function finalize_layer()
 
   burial_active = false
 
-  burial_release = true
-  burial_release_progress = 0
+  ------------------------------------------------
+  -- INITIATE CROSSFADE
+  ------------------------------------------------
+
+  if burial_source_voice ~= nil then
+    burial_crossfade = true
+    burial_crossfade_progress = 0
+    burial_crossfade_duration = final_length * 0.5
+  end
 
   apply_archeology()
 
@@ -507,29 +514,41 @@ function manual_record_control()
 end
 
 ------------------------------------------------
--- BURIAL RELEASE
+-- BURIAL CROSSFADE
 ------------------------------------------------
 
-function update_burial_release()
+function update_burial_crossfade()
 
-  if not burial_release then
+  if not burial_crossfade then
     return
   end
 
-  burial_release_progress =
-    burial_release_progress + 0.004
+  burial_crossfade_progress =
+    burial_crossfade_progress + 0.004
 
-  if burial_release_progress >= 1 then
+  if burial_crossfade_progress >= 1 then
 
-    burial_release = false
+    burial_crossfade = false
 
-    burial_release_progress = 1
+    burial_crossfade_progress = 1
 
     burial_source_voice = nil
 
   end
 
   apply_archeology()
+
+end
+
+function burial_crossfade_clock()
+
+  while true do
+
+    clock.sleep(0.05)
+
+    update_burial_crossfade()
+
+  end
 
 end
 
@@ -663,54 +682,41 @@ function apply_archeology()
         cutoff * (1.0 - (excavation_pressure * 0.35))
 
       ------------------------------------------------
-      -- ACTIVE EXCAVATION
+      -- ACTIVE RECORDING
       ------------------------------------------------
 
       if burial_active then
 
-        if voice == burial_source_voice then
+        softcut.level(voice,gain)
 
-          softcut.level(voice,1.0)
+        softcut.post_filter_fc(voice,cutoff)
 
-          softcut.post_filter_fc(voice,12000)
-
-          softcut.rate(voice,1.0)
-
-        else
-
-          softcut.level(voice,0)
-
-        end
+        softcut.rate(voice,1.0)
 
       ------------------------------------------------
-      -- POST BURIAL
+      -- POST-RECORDING CROSSFADE
       ------------------------------------------------
 
-      elseif burial_release
+      elseif burial_crossfade
       and voice == burial_source_voice then
 
-        local release = burial_release_progress
+        local progress = burial_crossfade_progress
 
-        local settling_gain =
-          1.0 - (release * 0.88)
+        -- fade from layer 1 to layer 2 state
+        local layer2_gain = env.gains[2] or 0.7
+        local layer2_cutoff = env.cutoffs[2] or 6500
 
-        settling_gain =
-          math.max(0.08, settling_gain)
+        local faded_gain =
+          gain * (1.0 - progress) + (layer2_gain * progress)
 
-        softcut.level(voice, settling_gain)
+        local faded_cutoff =
+          cutoff * (1.0 - progress) + (layer2_cutoff * progress)
 
-        local settling_cutoff =
-          12000 - (release * 10500)
+        softcut.level(voice, faded_gain)
 
-        softcut.post_filter_fc(
-          voice,
-          settling_cutoff
-        )
+        softcut.post_filter_fc(voice, faded_cutoff)
 
-        softcut.rate(
-          voice,
-          1.0 - (release * 0.015)
-        )
+        softcut.rate(voice, 1.0)
 
       ------------------------------------------------
       -- NORMAL PLAYBACK
