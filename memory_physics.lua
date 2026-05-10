@@ -43,13 +43,18 @@ end
 
 function setup_softcut()
 
+  audio.level_adc_cut(1.0)
   audio.level_cut(1.0)
 
   softcut.buffer_clear()
 
   for i = 1,3 do
 
+    local start_pos = (i - 1) * LOOP_LENGTH
+    local end_pos = start_pos + LOOP_LENGTH
+
     softcut.enable(i,1)
+
     softcut.buffer(i,1)
 
     softcut.level(i,0)
@@ -59,22 +64,25 @@ function setup_softcut()
     softcut.play(i,1)
     softcut.loop(i,1)
 
-    softcut.loop_start(i,0)
-    softcut.loop_end(i,LOOP_LENGTH)
+    softcut.loop_start(i,start_pos)
+    softcut.loop_end(i,end_pos)
 
-    softcut.position(i,0)
+    softcut.position(i,start_pos)
 
     softcut.rec(i,0)
 
     softcut.rec_level(i,1.0)
+
     softcut.pre_level(i,0.0)
 
     softcut.fade_time(i,0.05)
 
+    softcut.level_input_cut(1, i, 1.0)
+    softcut.level_input_cut(2, i, 1.0)
+
   end
 
 end
-
 ------------------------------------------------
 -- PARAMS
 ------------------------------------------------
@@ -160,11 +168,17 @@ function begin_new_layer()
 
   local voice = layers[1].voice
 
+  local start_pos = (voice - 1) * LOOP_LENGTH
+
   print("recording layer "..voice)
 
-  softcut.position(voice,0)
+  softcut.position(voice,start_pos)
 
   softcut.level(voice,1.0)
+
+  softcut.rec_level(voice,1.0)
+
+  softcut.pre_level(voice,0.0)
 
   softcut.rec(voice,1)
 
@@ -182,8 +196,11 @@ function finalize_layer()
 
   softcut.rec(voice,0)
 
-end
+  softcut.pre_level(voice,1.0)
 
+  softcut.level(voice,1.0)
+
+end
 function rotate_layers()
 
   local temp_voice = layers[3].voice
