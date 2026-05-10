@@ -26,7 +26,7 @@ local recording = false
 
 local NEW_LAYER_TIMEOUT = 1
 local REMOVE_LAYER_TIMEOUT = 16
-local MIN_PHRASE_GAP = 0.1
+local MIN_PHRASE_GAP = 0.001
 
 ------------------------------------------------
 -- MEMORY SYSTEM
