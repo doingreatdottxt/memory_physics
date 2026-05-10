@@ -1,6 +1,6 @@
 -- memory_physics.lua
 -- Archeology Mode Alpha
--- timeout-tail trimming + loop crossfade
+-- auto/manual excavation recording
 
 engine.name = "None"
 
@@ -21,18 +21,25 @@ local active_time = 0
 local recording = false
 
 ------------------------------------------------
+-- RECORD MODES
+------------------------------------------------
+
+local record_mode = "auto"
+local manual_recording = false
+
+------------------------------------------------
 -- TIMING
 ------------------------------------------------
 
 local NEW_LAYER_TIMEOUT = 1
 local REMOVE_LAYER_TIMEOUT = 16
-local MIN_PHRASE_GAP = 0.001
+local MIN_PHRASE_GAP = 0.1
 
 ------------------------------------------------
 -- MEMORY SYSTEM
 ------------------------------------------------
 
-local LOOP_LENGTH = 8
+local MAX_LOOP_LENGTH = 30
 
 local MAX_LAYERS = 6
 local ACTIVE_LAYERS = 5
@@ -90,7 +97,7 @@ function init()
       voice = i,
       active = false,
       dropout = false,
-      loop_end = LOOP_LENGTH
+      loop_end = MAX_LOOP_LENGTH
     }
 
   end
@@ -118,8 +125,8 @@ function setup_softcut()
 
   for i = 1, MAX_LAYERS do
 
-    local start_pos = (i - 1) * LOOP_LENGTH
-    local end_pos = start_pos + LOOP_LENGTH
+    local start_pos = (i - 1) * MAX_LOOP_LENGTH
+    local end_pos = start_pos + MAX_LOOP_LENGTH
 
     softcut.enable(i,1)
 
@@ -235,35 +242,58 @@ function monitor_input()
 
   while true do
 
-    if smoothed_level > threshold then
+    ------------------------------------------------
+    -- AUTO RECORD MODE
+    ------------------------------------------------
 
-      silence_time = 0
+    if record_mode == "auto" then
 
-      active_time = active_time + 0.05
+      if smoothed_level > threshold then
 
-      if not recording and can_trigger
-      and active_time > MIN_PHRASE_GAP then
+        silence_time = 0
 
-        begin_new_layer()
+        active_time = active_time + 0.05
 
-        can_trigger = false
+        if not recording
+        and can_trigger
+        and active_time > MIN_PHRASE_GAP then
+
+          begin_new_layer()
+
+          can_trigger = false
+
+        end
+
+      else
+
+        silence_time = silence_time + 0.05
+
+        active_time = 0
+
+        can_trigger = true
+
+        if recording
+        and silence_time > NEW_LAYER_TIMEOUT then
+
+          finalize_layer()
+
+        end
+
+        if silence_time > REMOVE_LAYER_TIMEOUT then
+
+          collapse_memory_stack()
+
+        end
 
       end
+
+    ------------------------------------------------
+    -- MANUAL RECORD MODE
+    ------------------------------------------------
 
     else
 
       silence_time = silence_time + 0.05
-
-      active_time = 0
-
-      can_trigger = true
-
-      if recording
-      and silence_time > NEW_LAYER_TIMEOUT then
-
-        finalize_layer()
-
-      end
 
       if silence_time > REMOVE_LAYER_TIMEOUT then
 
@@ -302,14 +332,14 @@ function begin_new_layer()
   print("recording layer "..new_voice)
 
   local start_pos =
-    (new_voice - 1) * LOOP_LENGTH
-
-  ------------------------------------------------
-  -- RESET LOOP WINDOW
-  ------------------------------------------------
+    (new_voice - 1) * MAX_LOOP_LENGTH
 
   softcut.loop_start(new_voice,start_pos)
-  softcut.loop_end(new_voice,start_pos + LOOP_LENGTH)
+
+  softcut.loop_end(
+    new_voice,
+    start_pos + MAX_LOOP_LENGTH
+  )
 
   softcut.position(new_voice,start_pos)
 
@@ -323,15 +353,11 @@ function begin_new_layer()
 
   softcut.rec(new_voice,1)
 
-  ------------------------------------------------
-  -- RECORD TIMING
-  ------------------------------------------------
-
   record_start_time = util.time()
 
   layers[MAX_LAYERS].active = true
   layers[MAX_LAYERS].dropout = false
-  layers[MAX_LAYERS].loop_end = LOOP_LENGTH
+  layers[MAX_LAYERS].loop_end = MAX_LOOP_LENGTH
 
   excavation_pressure =
     math.min(1.0, excavation_pressure + 0.08)
@@ -344,6 +370,8 @@ function finalize_layer()
 
   recording = false
 
+  manual_recording = false
+
   local voice = layers[MAX_LAYERS].voice
 
   print("finalize layer "..voice)
@@ -353,46 +381,57 @@ function finalize_layer()
   softcut.pre_level(voice,1.0)
 
   ------------------------------------------------
-  -- CALCULATE TRUE LOOP LENGTH
+  -- TRUE RECORD LENGTH
   ------------------------------------------------
 
   record_duration =
     util.time() - record_start_time
 
   ------------------------------------------------
-  -- REMOVE SILENCE TAIL
+  -- AUTO MODE TAIL TRIM
   ------------------------------------------------
 
-  local trimmed_length =
-    math.max(
-      0.25,
-      record_duration - NEW_LAYER_TIMEOUT
-    )
+  local final_length
 
-  ------------------------------------------------
-  -- LIMIT LOOP LENGTH
-  ------------------------------------------------
+  if record_mode == "auto" then
 
-  trimmed_length =
-    math.min(trimmed_length, LOOP_LENGTH)
+    final_length =
+      math.max(
+        0.25,
+        record_duration - NEW_LAYER_TIMEOUT
+      )
+
+  else
+
+    ------------------------------------------------
+    -- MANUAL MODE
+    ------------------------------------------------
+
+    final_length =
+      math.max(
+        0.25,
+        record_duration
+      )
+
+  end
+
+  final_length =
+    math.min(final_length, MAX_LOOP_LENGTH)
 
   local start_pos =
-    (voice - 1) * LOOP_LENGTH
+    (voice - 1) * MAX_LOOP_LENGTH
 
   local end_pos =
-    start_pos + trimmed_length
-
-  ------------------------------------------------
-  -- APPLY NEW LOOP WINDOW
-  ------------------------------------------------
+    start_pos + final_length
 
   softcut.loop_start(voice,start_pos)
+
   softcut.loop_end(voice,end_pos)
 
   layers[MAX_LAYERS].loop_end =
-    trimmed_length
+    final_length
 
-  print("trimmed loop "..trimmed_length)
+  print("loop length "..final_length)
 
   commit_burial()
 
@@ -402,6 +441,30 @@ function finalize_layer()
   burial_release_progress = 0
 
   apply_archeology()
+
+end
+
+------------------------------------------------
+-- MANUAL RECORD TOGGLE
+------------------------------------------------
+
+function toggle_manual_record()
+
+  if record_mode ~= "manual" then
+    return
+  end
+
+  if not manual_recording then
+
+    manual_recording = true
+
+    begin_new_layer()
+
+  else
+
+    finalize_layer()
+
+  end
 
 end
 
@@ -489,7 +552,7 @@ function collapse_memory_stack()
   layers[MAX_LAYERS].voice = removed_voice
   layers[MAX_LAYERS].active = false
   layers[MAX_LAYERS].dropout = false
-  layers[MAX_LAYERS].loop_end = LOOP_LENGTH
+  layers[MAX_LAYERS].loop_end = MAX_LOOP_LENGTH
 
   silence_time = 0
 
@@ -701,7 +764,7 @@ function redraw()
 
   screen.move(10,28)
   screen.text(
-    "IN "..string.format("%.3f",input_level)
+    "MODE "..record_mode
   )
 
   screen.move(10,40)
@@ -716,7 +779,12 @@ function redraw()
   )
 
   screen.move(10,64)
-  screen.text(environment)
+
+  if recording then
+    screen.text("RECORDING")
+  else
+    screen.text(environment)
+  end
 
   screen.update()
 
@@ -729,6 +797,40 @@ function redraw_clock()
     clock.sleep(1/15)
 
     redraw()
+
+  end
+
+end
+
+------------------------------------------------
+-- KEYS
+------------------------------------------------
+
+function key(n,z)
+
+  ------------------------------------------------
+  -- K2 = RECORD MODE TOGGLE
+  ------------------------------------------------
+
+  if n == 2 and z == 1 then
+
+    if record_mode == "auto" then
+      record_mode = "manual"
+    else
+      record_mode = "auto"
+    end
+
+    print("mode "..record_mode)
+
+  end
+
+  ------------------------------------------------
+  -- K3 = MANUAL RECORD
+  ------------------------------------------------
+
+  if n == 3 and z == 1 then
+
+    toggle_manual_record()
 
   end
 
