@@ -102,7 +102,8 @@ local environments = {
   "swamp",
   "river",
   "deep_sea",
-  "mountain"
+  "mountain",
+  "cave"
 }
 
 local environment_index = 1
@@ -657,142 +658,10 @@ function commit_burial()
 end
 
 ------------------------------------------------
--- ENVIRONMENT TABLES
-------------------------------------------------
-
-function get_environment_tables()
-
-  ------------------------------------------------
-  -- DESERT
-  ------------------------------------------------
-
-  if environment == "desert" then
-
-    return {
-
-      gains = {1.0,0.72,0.42,0.18,0.08,0.03},
-
-      cutoffs = {14000,9000,4500,2200,900,250},
-
-      drifts = {0,0.004,0.012,0.03,0.06,0.09},
-
-      highpass = {10,120,280,550,900,1500},
-
-      resonance = {1.0,1.4,1.8,2.2,2.8,3.4}
-
-    }
-
-  ------------------------------------------------
-  -- FOREST
-  ------------------------------------------------
-
-  elseif environment == "forest" then
-
-    return {
-
-      gains = {1.0,0.82,0.65,0.48,0.30,0.16},
-
-      cutoffs = {10000,6500,3200,1600,700,280},
-
-      drifts = {0,0.003,0.009,0.018,0.035,0.06},
-
-      highpass = {10,40,80,140,220,320},
-
-      resonance = {1.2,1.6,2.0,2.4,2.8,3.2}
-
-    }
-
-  ------------------------------------------------
-  -- SWAMP
-  ------------------------------------------------
-
-  elseif environment == "swamp" then
-
-    return {
-
-      gains = {1.0,0.90,0.74,0.56,0.38,0.22},
-
-      cutoffs = {7000,4200,2000,900,450,180},
-
-      drifts = {0,0.005,0.015,0.03,0.05,0.08},
-
-      highpass = {10,20,40,60,90,120},
-
-      resonance = {1.4,2.0,2.6,3.2,3.8,4.2}
-
-    }
-
-  ------------------------------------------------
-  -- RIVER
-  ------------------------------------------------
-
-  elseif environment == "river" then
-
-    return {
-
-      gains = {1.0,0.80,0.58,0.34,0.18,0.08},
-
-      cutoffs = {12000,7000,3400,1700,700,260},
-
-      drifts = {0,0.006,0.014,0.026,0.05,0.08},
-
-      highpass = {10,60,120,240,380,500},
-
-      resonance = {1.0,1.4,1.8,2.0,2.4,2.8}
-
-    }
-
-  ------------------------------------------------
-  -- DEEP SEA
-  ------------------------------------------------
-
-  elseif environment == "deep_sea" then
-
-    return {
-
-      gains = {1.0,0.92,0.80,0.66,0.52,0.36},
-
-      cutoffs = {4500,2400,1200,650,320,140},
-
-      drifts = {0,0.002,0.005,0.009,0.014,0.02},
-
-      highpass = {10,10,20,40,60,80},
-
-      resonance = {2.0,2.8,3.6,4.4,5.2,6.0}
-
-    }
-
-  ------------------------------------------------
-  -- MOUNTAIN
-  ------------------------------------------------
-
-  elseif environment == "mountain" then
-
-    return {
-
-      gains = {1.0,0.78,0.54,0.32,0.16,0.06},
-
-      cutoffs = {15000,10000,6000,3200,1400,500},
-
-      drifts = {0,0.002,0.006,0.014,0.028,0.05},
-
-      highpass = {10,180,400,800,1300,2200},
-
-      resonance = {0.8,1.0,1.2,1.6,2.0,2.4}
-
-    }
-
-  end
-
-end
-
-------------------------------------------------
 -- ARCHEOLOGY ENGINE
 ------------------------------------------------
 
 function apply_archeology()
-
-  local env = get_environment_tables()
 
   for i = 1, MAX_LAYERS do
 
@@ -801,36 +670,237 @@ function apply_archeology()
     if layers[i].active
     and i <= ACTIVE_LAYERS then
 
-      local gain = env.gains[i] or 0.03
+      local gain = 1.0 - ((i - 1) * 0.18)
 
-      local cutoff = env.cutoffs[i] or 250
-
-      local drift = env.drifts[i] or 0.05
-
-      local highpass = env.highpass[i] or 10
-
-      local resonance = env.resonance[i] or 1.2
-
-      ------------------------------------------------
-      -- PRESSURE SCALING
-      ------------------------------------------------
-
-      local pressure_scale =
+      local pressure =
         excavation_pressure * excavation_pressure
 
-      gain =
-        gain * (1.0 - (pressure_scale * (i * 0.18)))
+      local cutoff = 12000
+      local rq = 1.2
+      local drift = 0.0
 
-      cutoff =
-        cutoff * (1.0 - (pressure_scale * 0.72))
+      ------------------------------------------------
+      -- DESERT
+      ------------------------------------------------
 
-      highpass =
-        highpass +
-        (pressure_scale * i * 900)
+      if environment == "desert" then
 
-      drift =
-        drift +
-        (pressure_scale * 0.06)
+        cutoff =
+          14000 -
+          (pressure * i * 5000)
+
+        rq =
+          1.4 + (pressure * 2.4)
+
+        gain =
+          gain *
+          (1.0 - (pressure * i * 0.22))
+
+        drift =
+          pressure * 0.08
+
+        softcut.post_filter_hp(
+          voice,
+          math.min(1.0, pressure * 0.85)
+        )
+
+        softcut.post_filter_bp(
+          voice,
+          pressure * 0.35
+        )
+
+      ------------------------------------------------
+      -- FOREST
+      ------------------------------------------------
+
+      elseif environment == "forest" then
+
+        cutoff =
+          10000 -
+          (pressure * i * 9000)
+
+        rq =
+          0.8 + (pressure * 0.6)
+
+        gain =
+          gain *
+          (1.0 - (pressure * 0.32))
+
+        drift =
+          pressure * 0.015
+
+        softcut.post_filter_hp(
+          voice,
+          0
+        )
+
+        softcut.post_filter_bp(
+          voice,
+          pressure * 0.08
+        )
+
+      ------------------------------------------------
+      -- SWAMP
+      ------------------------------------------------
+
+      elseif environment == "swamp" then
+
+        cutoff =
+          7000 -
+          (pressure * i * 6000)
+
+        rq =
+          2.0 + (pressure * 2.5)
+
+        gain =
+          gain *
+          (1.0 - (pressure * 0.15))
+
+        drift =
+          pressure * 0.14
+
+        softcut.post_filter_hp(
+          voice,
+          pressure * 0.05
+        )
+
+        softcut.post_filter_bp(
+          voice,
+          pressure * 0.22
+        )
+
+      ------------------------------------------------
+      -- RIVER
+      ------------------------------------------------
+
+      elseif environment == "river" then
+
+        cutoff =
+          12000 -
+          (pressure * i * 3000)
+
+        rq =
+          1.2 + (pressure * 1.0)
+
+        gain =
+          gain *
+          (1.0 - (pressure * 0.12))
+
+        drift =
+          pressure * 0.24
+
+        if i >= 4 and math.random() < (pressure * 0.18) then
+          gain = gain * 2.2
+        end
+
+        softcut.post_filter_hp(
+          voice,
+          pressure * 0.12
+        )
+
+        softcut.post_filter_bp(
+          voice,
+          pressure * 0.12
+        )
+
+      ------------------------------------------------
+      -- DEEP SEA
+      ------------------------------------------------
+
+      elseif environment == "deep_sea" then
+
+        cutoff =
+          5000 -
+          (pressure * i * 4200)
+
+        rq =
+          2.4 + (pressure * 4.0)
+
+        gain =
+          gain *
+          (1.0 - (pressure * 0.08))
+
+        drift =
+          pressure * 0.01
+
+        softcut.post_filter_hp(
+          voice,
+          0
+        )
+
+        softcut.post_filter_bp(
+          voice,
+          pressure * 0.45
+        )
+
+      ------------------------------------------------
+      -- MOUNTAIN
+      ------------------------------------------------
+
+      elseif environment == "mountain" then
+
+        cutoff =
+          15000 -
+          (pressure * i * 7000)
+
+        rq =
+          1.6 + (pressure * 5.0)
+
+        gain =
+          gain *
+          (1.0 - (pressure * 0.28))
+
+        drift =
+          pressure * 0.18
+
+        if pressure > 0.75
+        and math.random() < 0.12 then
+
+          gain = gain * 3.5
+
+        end
+
+        softcut.post_filter_hp(
+          voice,
+          pressure * 0.42
+        )
+
+        softcut.post_filter_bp(
+          voice,
+          pressure * 0.65
+        )
+
+      ------------------------------------------------
+      -- CAVE
+      ------------------------------------------------
+
+      elseif environment == "cave" then
+
+        cutoff =
+          9000 -
+          (pressure * i * 4500)
+
+        rq =
+          2.0 + (pressure * 2.2)
+
+        gain =
+          gain *
+          (1.0 - (pressure * 0.18))
+
+        drift =
+          pressure * 0.03
+
+        softcut.post_filter_hp(
+          voice,
+          pressure * 0.04
+        )
+
+        softcut.post_filter_bp(
+          voice,
+          pressure * 0.32
+        )
+
+      end
 
       ------------------------------------------------
       -- DROPOUT DAMAGE
@@ -841,10 +911,13 @@ function apply_archeology()
       end
 
       ------------------------------------------------
-      -- PLAYBACK
+      -- APPLY
       ------------------------------------------------
 
-      softcut.level(voice,gain)
+      softcut.level(
+        voice,
+        util.clamp(gain,0,2.5)
+      )
 
       softcut.post_filter_fc(
         voice,
@@ -853,12 +926,7 @@ function apply_archeology()
 
       softcut.post_filter_rq(
         voice,
-        resonance
-      )
-
-      softcut.post_filter_hp(
-        voice,
-        1.0
+        rq
       )
 
       softcut.post_filter_lp(
@@ -1022,16 +1090,12 @@ end
 
 function key(n,z)
 
-  ------------------------------------------------
-  -- K1 STATE
-  ------------------------------------------------
-
   if n == 1 then
     k1_hold = (z == 1)
   end
 
   ------------------------------------------------
-  -- K1 + K2 = TOGGLE AUTO/MANUAL
+  -- K1 + K2 = TOGGLE MODE
   ------------------------------------------------
 
   if n == 2 and z == 1 and k1_hold then
@@ -1053,7 +1117,7 @@ function key(n,z)
   end
 
   ------------------------------------------------
-  -- K1 + K3 = CHANGE ENVIRONMENT
+  -- K1 + K3 = ENVIRONMENT
   ------------------------------------------------
 
   if n == 3 and z == 1 and k1_hold then
@@ -1077,7 +1141,7 @@ function key(n,z)
   end
 
   ------------------------------------------------
-  -- K2 AUTO MODE = END RECORDING
+  -- K2 RECORD CONTROL
   ------------------------------------------------
 
   if n == 2 and z == 1 and not k1_hold then
@@ -1105,7 +1169,7 @@ end
 function enc(n,d)
 
   ------------------------------------------------
-  -- ENC 1 = EFFECTS PRESSURE
+  -- ENC 1 = PRESSURE
   ------------------------------------------------
 
   if n == 1 then
@@ -1120,7 +1184,7 @@ function enc(n,d)
     apply_archeology()
 
   ------------------------------------------------
-  -- ENC 2 = LAYER TIMEOUT
+  -- ENC 2 = TIMEOUT
   ------------------------------------------------
 
   elseif n == 2 then
@@ -1133,7 +1197,7 @@ function enc(n,d)
       )
 
   ------------------------------------------------
-  -- ENC 3 = MAX LAYERS
+  -- ENC 3 = LAYERS
   ------------------------------------------------
 
   elseif n == 3 then
