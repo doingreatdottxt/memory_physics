@@ -1,6 +1,6 @@
 -- memory_physics.lua
 -- Archeology Mode Alpha
--- auto/manual excavation recording
+-- environmental excavation memory system
 
 engine.name = "None"
 
@@ -55,7 +55,7 @@ local can_trigger = true
 -- EXCAVATION PRESSURE
 ------------------------------------------------
 
-local excavation_pressure = 0
+local excavation_pressure = 0.25
 
 ------------------------------------------------
 -- BURIAL STATE
@@ -96,7 +96,17 @@ local record_duration = 0
 -- ENVIRONMENT
 ------------------------------------------------
 
-local environment = "desert"
+local environments = {
+  "desert",
+  "forest",
+  "swamp",
+  "river",
+  "deep_sea",
+  "mountain"
+}
+
+local environment_index = 1
+local environment = environments[environment_index]
 
 ------------------------------------------------
 -- KEY STATE
@@ -180,6 +190,11 @@ function setup_softcut()
 
     softcut.level_cut_cut(i, i, 0)
 
+    softcut.post_filter_dry(i,0.0)
+    softcut.post_filter_lp(i,1.0)
+    softcut.post_filter_bp(i,0.0)
+    softcut.post_filter_hp(i,0.0)
+
   end
 
 end
@@ -199,20 +214,6 @@ function setup_params()
 
   params:set_action("threshold", function(x)
     threshold = x
-  end)
-
-  params:add_number(
-    "active_layers",
-    "active layers",
-    3,
-    MAX_LAYERS,
-    5
-  )
-
-  params:set_action("active_layers", function(x)
-
-    ACTIVE_LAYERS = x
-
   end)
 
   params:add{
@@ -265,10 +266,6 @@ function monitor_input()
 
   while true do
 
-    ------------------------------------------------
-    -- AUTO MODE
-    ------------------------------------------------
-
     if record_mode == "auto" then
 
       if smoothed_level > threshold then
@@ -309,10 +306,6 @@ function monitor_input()
         end
 
       end
-
-    ------------------------------------------------
-    -- MANUAL MODE
-    ------------------------------------------------
 
     else
 
@@ -394,7 +387,7 @@ function begin_new_layer()
   layers[MAX_LAYERS].loop_end = MAX_LOOP_LENGTH
 
   excavation_pressure =
-    math.min(1.0, excavation_pressure + 0.08)
+    math.min(1.0, excavation_pressure + 0.06)
 
   apply_archeology()
 
@@ -613,7 +606,7 @@ function finalize_collapse()
   layers[MAX_LAYERS].loop_end = MAX_LOOP_LENGTH
 
   excavation_pressure =
-    math.max(0, excavation_pressure - 0.12)
+    math.max(0, excavation_pressure - 0.1)
 
   collapse_source_voice = nil
   collapse_target_voice = nil
@@ -669,28 +662,124 @@ end
 
 function get_environment_tables()
 
+  ------------------------------------------------
+  -- DESERT
+  ------------------------------------------------
+
   if environment == "desert" then
 
     return {
-      gains = {1.0,0.7,0.45,0.22,0.10,0.05},
-      cutoffs = {12000,6500,3500,1800,800,250},
-      drifts = {0,0.003,0.008,0.015,0.03,0.05}
+
+      gains = {1.0,0.72,0.42,0.18,0.08,0.03},
+
+      cutoffs = {14000,9000,4500,2200,900,250},
+
+      drifts = {0,0.004,0.012,0.03,0.06,0.09},
+
+      highpass = {10,120,280,550,900,1500},
+
+      resonance = {1.0,1.4,1.8,2.2,2.8,3.4}
+
     }
+
+  ------------------------------------------------
+  -- FOREST
+  ------------------------------------------------
 
   elseif environment == "forest" then
 
     return {
-      gains = {1.0,0.8,0.6,0.42,0.28,0.14},
-      cutoffs = {9000,5000,2400,1200,700,300},
-      drifts = {0,0.006,0.012,0.022,0.04,0.07}
+
+      gains = {1.0,0.82,0.65,0.48,0.30,0.16},
+
+      cutoffs = {10000,6500,3200,1600,700,280},
+
+      drifts = {0,0.003,0.009,0.018,0.035,0.06},
+
+      highpass = {10,40,80,140,220,320},
+
+      resonance = {1.2,1.6,2.0,2.4,2.8,3.2}
+
     }
 
-  else
+  ------------------------------------------------
+  -- SWAMP
+  ------------------------------------------------
+
+  elseif environment == "swamp" then
 
     return {
-      gains = {1.0,0.7,0.45,0.22,0.10,0.05},
-      cutoffs = {12000,6500,3500,1800,800,250},
-      drifts = {0,0.003,0.008,0.015,0.03,0.05}
+
+      gains = {1.0,0.90,0.74,0.56,0.38,0.22},
+
+      cutoffs = {7000,4200,2000,900,450,180},
+
+      drifts = {0,0.005,0.015,0.03,0.05,0.08},
+
+      highpass = {10,20,40,60,90,120},
+
+      resonance = {1.4,2.0,2.6,3.2,3.8,4.2}
+
+    }
+
+  ------------------------------------------------
+  -- RIVER
+  ------------------------------------------------
+
+  elseif environment == "river" then
+
+    return {
+
+      gains = {1.0,0.80,0.58,0.34,0.18,0.08},
+
+      cutoffs = {12000,7000,3400,1700,700,260},
+
+      drifts = {0,0.006,0.014,0.026,0.05,0.08},
+
+      highpass = {10,60,120,240,380,500},
+
+      resonance = {1.0,1.4,1.8,2.0,2.4,2.8}
+
+    }
+
+  ------------------------------------------------
+  -- DEEP SEA
+  ------------------------------------------------
+
+  elseif environment == "deep_sea" then
+
+    return {
+
+      gains = {1.0,0.92,0.80,0.66,0.52,0.36},
+
+      cutoffs = {4500,2400,1200,650,320,140},
+
+      drifts = {0,0.002,0.005,0.009,0.014,0.02},
+
+      highpass = {10,10,20,40,60,80},
+
+      resonance = {2.0,2.8,3.6,4.4,5.2,6.0}
+
+    }
+
+  ------------------------------------------------
+  -- MOUNTAIN
+  ------------------------------------------------
+
+  elseif environment == "mountain" then
+
+    return {
+
+      gains = {1.0,0.78,0.54,0.32,0.16,0.06},
+
+      cutoffs = {15000,10000,6000,3200,1400,500},
+
+      drifts = {0,0.002,0.006,0.014,0.028,0.05},
+
+      highpass = {10,180,400,800,1300,2200},
+
+      resonance = {0.8,1.0,1.2,1.6,2.0,2.4}
+
     }
 
   end
@@ -718,124 +807,71 @@ function apply_archeology()
 
       local drift = env.drifts[i] or 0.05
 
+      local highpass = env.highpass[i] or 10
+
+      local resonance = env.resonance[i] or 1.2
+
+      ------------------------------------------------
+      -- PRESSURE SCALING
+      ------------------------------------------------
+
+      local pressure_scale =
+        excavation_pressure * excavation_pressure
+
       gain =
-        gain * (1.0 - (excavation_pressure * (i * 0.06)))
+        gain * (1.0 - (pressure_scale * (i * 0.18)))
 
       cutoff =
-        cutoff * (1.0 - (excavation_pressure * 0.35))
+        cutoff * (1.0 - (pressure_scale * 0.72))
 
-      if burial_active then
+      highpass =
+        highpass +
+        (pressure_scale * i * 900)
 
-        softcut.level(voice,gain)
+      drift =
+        drift +
+        (pressure_scale * 0.06)
 
-        softcut.post_filter_fc(voice,cutoff)
+      ------------------------------------------------
+      -- DROPOUT DAMAGE
+      ------------------------------------------------
 
-        softcut.rate(voice,1.0)
-
-      elseif burial_crossfade
-      and voice == burial_source_voice then
-
-        local progress = burial_crossfade_progress
-
-        local layer2_gain = env.gains[2] or 0.7
-        local layer2_cutoff = env.cutoffs[2] or 6500
-
-        local faded_gain =
-          gain * (1.0 - progress) + (layer2_gain * progress)
-
-        local faded_cutoff =
-          cutoff * (1.0 - progress) + (layer2_cutoff * progress)
-
-        softcut.level(voice, faded_gain)
-
-        softcut.post_filter_fc(voice, faded_cutoff)
-
-        softcut.rate(voice, 1.0)
-
-      elseif collapse_crossfade then
-
-        local progress = collapse_crossfade_progress
-
-        if voice == collapse_source_voice then
-
-          local layer1_gain = env.gains[1] or 1.0
-          local layer1_cutoff = env.cutoffs[1] or 12000
-
-          local faded_gain =
-            layer1_gain * (1.0 - progress)
-
-          local faded_cutoff =
-            layer1_cutoff * (1.0 - progress) + (env.cutoffs[2] or 6500) * progress
-
-          softcut.level(voice, faded_gain)
-
-          softcut.post_filter_fc(voice, faded_cutoff)
-
-          softcut.rate(voice, 1.0)
-
-        elseif voice == collapse_target_voice then
-
-          local layer1_gain = env.gains[1] or 1.0
-          local layer1_cutoff = env.cutoffs[1] or 12000
-          local layer2_gain = env.gains[2] or 0.7
-          local layer2_cutoff = env.cutoffs[2] or 6500
-
-          local faded_gain =
-            layer2_gain * (1.0 - progress) + (layer1_gain * progress)
-
-          local faded_cutoff =
-            layer2_cutoff * (1.0 - progress) + (layer1_cutoff * progress)
-
-          softcut.level(voice, faded_gain)
-
-          softcut.post_filter_fc(voice, faded_cutoff)
-
-          softcut.rate(voice, 1.0)
-
-        else
-
-          if layers[i].dropout then
-            gain = gain * 0.15
-          end
-
-          softcut.level(voice,gain)
-
-          softcut.post_filter_fc(voice,cutoff)
-
-          softcut.post_filter_rq(voice,1.8)
-
-          local rate =
-            1.0 +
-            ((math.random() * drift)
-            - (drift / 2))
-
-          softcut.rate(voice,rate)
-
-        end
-
-      else
-
-        if layers[i].dropout then
-          gain = gain * 0.15
-        end
-
-        softcut.level(voice,gain)
-
-        softcut.post_filter_fc(
-          voice,
-          cutoff
-        )
-
-        softcut.post_filter_rq(voice,1.8)
-
-        local rate =
-          1.0 +
-          ((math.random() * drift)
-          - (drift / 2))
-
-        softcut.rate(voice,rate)
-
+      if layers[i].dropout then
+        gain = gain * 0.12
       end
+
+      ------------------------------------------------
+      -- PLAYBACK
+      ------------------------------------------------
+
+      softcut.level(voice,gain)
+
+      softcut.post_filter_fc(
+        voice,
+        math.max(80, cutoff)
+      )
+
+      softcut.post_filter_rq(
+        voice,
+        resonance
+      )
+
+      softcut.post_filter_hp(
+        voice,
+        1.0
+      )
+
+      softcut.post_filter_lp(
+        voice,
+        1.0
+      )
+
+      local rate =
+        1.0 +
+        ((math.random() * drift)
+        - (drift / 2))
+
+      softcut.rate(voice,rate)
 
     else
 
@@ -857,13 +893,14 @@ function archeology_decay_clock()
 
     if not burial_active and not collapse_crossfade then
 
-      for i = 4, ACTIVE_LAYERS do
+      for i = 3, ACTIVE_LAYERS do
 
         if layers[i].active then
 
           local chance =
-            0.08 + (i * 0.08)
-            + (excavation_pressure * 0.2)
+            0.05 +
+            (i * 0.1) +
+            (excavation_pressure * 0.45)
 
           if math.random() < chance then
 
@@ -880,7 +917,7 @@ function archeology_decay_clock()
 
     end
 
-    clock.sleep(0.6)
+    clock.sleep(0.45)
 
   end
 
@@ -1016,6 +1053,30 @@ function key(n,z)
   end
 
   ------------------------------------------------
+  -- K1 + K3 = CHANGE ENVIRONMENT
+  ------------------------------------------------
+
+  if n == 3 and z == 1 and k1_hold then
+
+    environment_index =
+      environment_index + 1
+
+    if environment_index > #environments then
+      environment_index = 1
+    end
+
+    environment =
+      environments[environment_index]
+
+    print("environment "..environment)
+
+    apply_archeology()
+
+    return
+
+  end
+
+  ------------------------------------------------
   -- K2 AUTO MODE = END RECORDING
   ------------------------------------------------
 
@@ -1051,7 +1112,7 @@ function enc(n,d)
 
     excavation_pressure =
       util.clamp(
-        excavation_pressure + (d * 0.01),
+        excavation_pressure + (d * 0.02),
         0,
         1
       )
