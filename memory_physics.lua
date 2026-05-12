@@ -116,6 +116,21 @@ local environment = environments[environment_index]
 local k1_hold = false
 
 ------------------------------------------------
+-- GRANULAR / NOISE STATE
+------------------------------------------------
+
+local grain_clock_running = false
+local noise_clock_running = false
+
+local layer_pressure_memory = {}
+
+------------------------------------------------
+-- BEDROCK
+------------------------------------------------
+
+local bedrock_enabled = false
+
+------------------------------------------------
 -- INIT
 ------------------------------------------------
 
@@ -129,8 +144,14 @@ function init()
       voice = i,
       active = false,
       dropout = false,
-      loop_end = MAX_LOOP_LENGTH
+      loop_end = MAX_LOOP_LENGTH,
+
+      pressure_memory = 0,
+      erosion_memory = 0,
+      granulated = false
     }
+
+    layer_pressure_memory[i] = 0
 
   end
 
@@ -143,6 +164,9 @@ function init()
   clock.run(archeology_decay_clock)
   clock.run(burial_crossfade_clock)
   clock.run(collapse_crossfade_clock)
+
+  clock.run(granular_motion_clock)
+  clock.run(environment_noise_clock)
 
 end
 
@@ -542,6 +566,18 @@ end
 
 function begin_collapse_sequence()
 
+  local active_count = 0
+
+  for i = 1, ACTIVE_LAYERS do
+    if layers[i].active then
+      active_count = active_count + 1
+    end
+  end
+
+  if bedrock_enabled and active_count <= 1 then
+    return
+  end
+
   if not layers[1].active then
     return
   end
@@ -586,6 +622,66 @@ end
 
 function finalize_collapse()
 
+  if bedrock_enabled then
+
+    local lowest_active = nil
+
+    for i = ACTIVE_LAYERS, 1, -1 do
+
+      if layers[i].active then
+        lowest_active = i
+        break
+      end
+
+    end
+
+    if lowest_active == 1 then
+
+      collapse_crossfade = false
+      collapse_source_voice = nil
+      collapse_target_voice = nil
+
+      return
+
+    end
+
+    print("bedrock protected collapse")
+
+    local removed_voice = layers[1].voice
+
+    softcut.level(removed_voice, 0)
+
+    for i = 1, lowest_active - 2 do
+
+      layers[i].voice = layers[i+1].voice
+      layers[i].active = layers[i+1].active
+      layers[i].dropout = layers[i+1].dropout
+      layers[i].loop_end = layers[i+1].loop_end
+      layers[i].pressure_memory =
+        layers[i+1].pressure_memory
+
+    end
+
+    local insert_index = lowest_active - 1
+
+    layers[insert_index].voice = removed_voice
+    layers[insert_index].active = false
+    layers[insert_index].dropout = false
+    layers[insert_index].loop_end = MAX_LOOP_LENGTH
+    layers[insert_index].pressure_memory = 0
+
+    excavation_pressure =
+      math.max(0, excavation_pressure - 0.08)
+
+    collapse_source_voice = nil
+    collapse_target_voice = nil
+
+    apply_archeology()
+
+    return
+
+  end
+
   print("memory collapse finalized")
 
   local removed_voice = layers[1].voice
@@ -598,6 +694,8 @@ function finalize_collapse()
     layers[i].active = layers[i+1].active
     layers[i].dropout = layers[i+1].dropout
     layers[i].loop_end = layers[i+1].loop_end
+    layers[i].pressure_memory =
+      layers[i+1].pressure_memory
 
   end
 
@@ -605,6 +703,7 @@ function finalize_collapse()
   layers[MAX_LAYERS].active = false
   layers[MAX_LAYERS].dropout = false
   layers[MAX_LAYERS].loop_end = MAX_LOOP_LENGTH
+  layers[MAX_LAYERS].pressure_memory = 0
 
   excavation_pressure =
     math.max(0, excavation_pressure - 0.1)
@@ -638,7 +737,9 @@ function commit_burial()
     voice = layers[MAX_LAYERS].voice,
     active = layers[MAX_LAYERS].active,
     dropout = layers[MAX_LAYERS].dropout,
-    loop_end = layers[MAX_LAYERS].loop_end
+    loop_end = layers[MAX_LAYERS].loop_end,
+    pressure_memory =
+      layers[MAX_LAYERS].pressure_memory
   }
 
   for i = MAX_LAYERS, 2, -1 do
@@ -647,6 +748,8 @@ function commit_burial()
     layers[i].active = layers[i-1].active
     layers[i].dropout = layers[i-1].dropout
     layers[i].loop_end = layers[i-1].loop_end
+    layers[i].pressure_memory =
+      layers[i-1].pressure_memory
 
   end
 
@@ -654,563 +757,7 @@ function commit_burial()
   layers[1].active = temp.active
   layers[1].dropout = temp.dropout
   layers[1].loop_end = temp.loop_end
-
-end
-
-------------------------------------------------
--- ARCHEOLOGY ENGINE
-------------------------------------------------
-
-function apply_archeology()
-
-  for i = 1, MAX_LAYERS do
-
-    local voice = layers[i].voice
-
-    if layers[i].active
-    and i <= ACTIVE_LAYERS then
-
-      local gain = 1.0 - ((i - 1) * 0.18)
-
-      local pressure =
-        excavation_pressure * excavation_pressure
-
-      local cutoff = 12000
-      local rq = 1.2
-      local drift = 0.0
-
-      ------------------------------------------------
-      -- DESERT
-      ------------------------------------------------
-
-      if environment == "desert" then
-
-        cutoff =
-          14000 -
-          (pressure * i * 5000)
-
-        rq =
-          1.4 + (pressure * 2.4)
-
-        gain =
-          gain *
-          (1.0 - (pressure * i * 0.22))
-
-        drift =
-          pressure * 0.08
-
-        softcut.post_filter_hp(
-          voice,
-          math.min(1.0, pressure * 0.85)
-        )
-
-        softcut.post_filter_bp(
-          voice,
-          pressure * 0.35
-        )
-
-      ------------------------------------------------
-      -- FOREST
-      ------------------------------------------------
-
-      elseif environment == "forest" then
-
-        cutoff =
-          10000 -
-          (pressure * i * 9000)
-
-        rq =
-          0.8 + (pressure * 0.6)
-
-        gain =
-          gain *
-          (1.0 - (pressure * 0.32))
-
-        drift =
-          pressure * 0.015
-
-        softcut.post_filter_hp(
-          voice,
-          0
-        )
-
-        softcut.post_filter_bp(
-          voice,
-          pressure * 0.08
-        )
-
-      ------------------------------------------------
-      -- SWAMP
-      ------------------------------------------------
-
-      elseif environment == "swamp" then
-
-        cutoff =
-          7000 -
-          (pressure * i * 6000)
-
-        rq =
-          2.0 + (pressure * 2.5)
-
-        gain =
-          gain *
-          (1.0 - (pressure * 0.15))
-
-        drift =
-          pressure * 0.14
-
-        softcut.post_filter_hp(
-          voice,
-          pressure * 0.05
-        )
-
-        softcut.post_filter_bp(
-          voice,
-          pressure * 0.22
-        )
-
-      ------------------------------------------------
-      -- RIVER
-      ------------------------------------------------
-
-      elseif environment == "river" then
-
-        cutoff =
-          12000 -
-          (pressure * i * 3000)
-
-        rq =
-          1.2 + (pressure * 1.0)
-
-        gain =
-          gain *
-          (1.0 - (pressure * 0.12))
-
-        drift =
-          pressure * 0.24
-
-        if i >= 4 and math.random() < (pressure * 0.18) then
-          gain = gain * 2.2
-        end
-
-        softcut.post_filter_hp(
-          voice,
-          pressure * 0.12
-        )
-
-        softcut.post_filter_bp(
-          voice,
-          pressure * 0.12
-        )
-
-      ------------------------------------------------
-      -- DEEP SEA
-      ------------------------------------------------
-
-      elseif environment == "deep_sea" then
-
-        cutoff =
-          5000 -
-          (pressure * i * 4200)
-
-        rq =
-          2.4 + (pressure * 4.0)
-
-        gain =
-          gain *
-          (1.0 - (pressure * 0.08))
-
-        drift =
-          pressure * 0.01
-
-        softcut.post_filter_hp(
-          voice,
-          0
-        )
-
-        softcut.post_filter_bp(
-          voice,
-          pressure * 0.45
-        )
-
-      ------------------------------------------------
-      -- MOUNTAIN
-      ------------------------------------------------
-
-      elseif environment == "mountain" then
-
-        cutoff =
-          15000 -
-          (pressure * i * 7000)
-
-        rq =
-          1.6 + (pressure * 5.0)
-
-        gain =
-          gain *
-          (1.0 - (pressure * 0.28))
-
-        drift =
-          pressure * 0.18
-
-        if pressure > 0.75
-        and math.random() < 0.12 then
-
-          gain = gain * 3.5
-
-        end
-
-        softcut.post_filter_hp(
-          voice,
-          pressure * 0.42
-        )
-
-        softcut.post_filter_bp(
-          voice,
-          pressure * 0.65
-        )
-
-      ------------------------------------------------
-      -- CAVE
-      ------------------------------------------------
-
-      elseif environment == "cave" then
-
-        cutoff =
-          9000 -
-          (pressure * i * 4500)
-
-        rq =
-          2.0 + (pressure * 2.2)
-
-        gain =
-          gain *
-          (1.0 - (pressure * 0.18))
-
-        drift =
-          pressure * 0.03
-
-        softcut.post_filter_hp(
-          voice,
-          pressure * 0.04
-        )
-
-        softcut.post_filter_bp(
-          voice,
-          pressure * 0.32
-        )
-
-      end
-
-      ------------------------------------------------
-      -- DROPOUT DAMAGE
-      ------------------------------------------------
-
-      if layers[i].dropout then
-        gain = gain * 0.12
-      end
-
-      ------------------------------------------------
-      -- APPLY
-      ------------------------------------------------
-
-      softcut.level(
-        voice,
-        util.clamp(gain,0,2.5)
-      )
-
-      softcut.post_filter_fc(
-        voice,
-        math.max(80, cutoff)
-      )
-
-      softcut.post_filter_rq(
-        voice,
-        rq
-      )
-
-      softcut.post_filter_lp(
-        voice,
-        1.0
-      )
-
-      local rate =
-        1.0 +
-        ((math.random() * drift)
-        - (drift / 2))
-
-      softcut.rate(voice,rate)
-
-    else
-
-      softcut.level(voice,0)
-
-    end
-
-  end
-
-end
-
-------------------------------------------------
--- EROSION CLOCK
-------------------------------------------------
-
-function archeology_decay_clock()
-
-  while true do
-
-    if not burial_active and not collapse_crossfade then
-
-      for i = 3, ACTIVE_LAYERS do
-
-        if layers[i].active then
-
-          local chance =
-            0.05 +
-            (i * 0.1) +
-            (excavation_pressure * 0.45)
-
-          if math.random() < chance then
-
-            layers[i].dropout =
-              not layers[i].dropout
-
-          end
-
-        end
-
-      end
-
-      apply_archeology()
-
-    end
-
-    clock.sleep(0.45)
-
-  end
-
-end
-
-------------------------------------------------
--- UI
-------------------------------------------------
-
-function redraw()
-
-  screen.clear()
-
-  screen.level(15)
-  screen.move(10,12)
-  screen.text("ARCHEOLOGY")
-
-  screen.level(10)
-  screen.move(10,24)
-  screen.text("MODE")
-
-  screen.level(15)
-  screen.move(64,24)
-  screen.text(record_mode)
-
-  screen.level(10)
-  screen.move(10,36)
-  screen.text("STATE")
-
-  screen.level(15)
-  screen.move(64,36)
-
-  if manual_waiting_for_input then
-
-    screen.text("ARMED")
-
-  elseif recording then
-
-    screen.text("REC")
-
-  elseif collapse_crossfade then
-
-    screen.text("COLLAPSE")
-
-  else
-
-    screen.text(environment)
-
-  end
-
-  screen.level(10)
-  screen.move(10,48)
-  screen.text("PRESS")
-
-  screen.level(15)
-  screen.move(64,48)
-  screen.text(
-    string.format("%.2f",
-    excavation_pressure)
-  )
-
-  screen.level(10)
-  screen.move(10,60)
-  screen.text("TIMEOUT")
-
-  screen.level(15)
-  screen.move(64,60)
-  screen.text(
-    string.format("%.1fs",
-    REMOVE_LAYER_TIMEOUT)
-  )
-
-  screen.level(10)
-  screen.move(10,72)
-  screen.text("LAYERS")
-
-  screen.level(15)
-  screen.move(64,72)
-  screen.text(
-    ACTIVE_LAYERS
-  )
-
-  screen.update()
-
-end
-
-function redraw_clock()
-
-  while true do
-
-    clock.sleep(1/15)
-
-    redraw()
-
-  end
-
-end
-
-------------------------------------------------
--- KEYS
-------------------------------------------------
-
-function key(n,z)
-
-  if n == 1 then
-    k1_hold = (z == 1)
-  end
-
-  ------------------------------------------------
-  -- K1 + K2 = TOGGLE MODE
-  ------------------------------------------------
-
-  if n == 2 and z == 1 and k1_hold then
-
-    if record_mode == "auto" then
-      record_mode = "manual"
-    else
-      record_mode = "auto"
-    end
-
-    manual_armed = false
-    manual_waiting_for_input = false
-    manual_recording = false
-
-    print("mode "..record_mode)
-
-    return
-
-  end
-
-  ------------------------------------------------
-  -- K1 + K3 = ENVIRONMENT
-  ------------------------------------------------
-
-  if n == 3 and z == 1 and k1_hold then
-
-    environment_index =
-      environment_index + 1
-
-    if environment_index > #environments then
-      environment_index = 1
-    end
-
-    environment =
-      environments[environment_index]
-
-    print("environment "..environment)
-
-    apply_archeology()
-
-    return
-
-  end
-
-  ------------------------------------------------
-  -- K2 RECORD CONTROL
-  ------------------------------------------------
-
-  if n == 2 and z == 1 and not k1_hold then
-
-    if record_mode == "auto" then
-
-      if recording then
-        finalize_layer()
-      end
-
-    else
-
-      manual_record_control()
-
-    end
-
-  end
-
-end
-
-------------------------------------------------
--- ENCODERS
-------------------------------------------------
-
-function enc(n,d)
-
-  ------------------------------------------------
-  -- ENC 1 = PRESSURE
-  ------------------------------------------------
-
-  if n == 1 then
-
-    excavation_pressure =
-      util.clamp(
-        excavation_pressure + (d * 0.02),
-        0,
-        1
-      )
-
-    apply_archeology()
-
-  ------------------------------------------------
-  -- ENC 2 = TIMEOUT
-  ------------------------------------------------
-
-  elseif n == 2 then
-
-    REMOVE_LAYER_TIMEOUT =
-      util.clamp(
-        REMOVE_LAYER_TIMEOUT + (d * 0.25),
-        1,
-        30
-      )
-
-  ------------------------------------------------
-  -- ENC 3 = LAYERS
-  ------------------------------------------------
-
-  elseif n == 3 then
-
-    ACTIVE_LAYERS =
-      util.clamp(
-        ACTIVE_LAYERS + d,
-        3,
-        MAX_LAYERS
-      )
-
-    apply_archeology()
-
-  end
+  layers[1].pressure_memory =
+    temp.pressure_memory
 
 end
