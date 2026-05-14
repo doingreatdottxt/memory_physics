@@ -1,12 +1,5 @@
 -- memory_physics
--- ENC 1: Biome 
--- ENC 2: Weather (Agitates top layers)
--- ENC 3: Pressure (Buries audio into bedrock)
-
--- K3: Toggle Auto/Manual Record Mode
--- K2: Record / Finish Phrase (Manual Only)
--- K1 + K3: Cycle Sync (Free / Beat / Bar)
--- K2 + K3: HARD RESET (Clear Pressure & Master Sync)
+-- archaeology of sound
 
 local Env = require "memory_physics/lib/environments"
 local Phys = require "memory_physics/lib/physics"
@@ -102,9 +95,14 @@ function handle_event(idx, e)
 end
 
 function enc(n, d)
-  if n == 1 then params:delta("environment", d)
-  elseif n == 2 then weather_intensity = util.clamp(weather_intensity + (d/100), 0, 1)
-  elseif n == 3 then excavation_pressure = util.clamp(excavation_pressure + (d/100), 0, 1) end
+  if n == 1 then 
+    params:delta("environment", d)
+  elseif n == 2 then 
+    weather_intensity = util.clamp(weather_intensity + (d/100), 0, 1)
+  elseif n == 3 then 
+    excavation_pressure = util.clamp(excavation_pressure + (d/100), 0, 1) 
+  end
+  redraw() 
 end
 
 function key(n, z)
@@ -116,6 +114,7 @@ function key(n, z)
     excavation_pressure = 0
     weather_intensity = 0.25
     master_duration = -1
+    redraw()
     return
   end
 
@@ -131,6 +130,7 @@ function key(n, z)
       end
     end
   end
+  redraw()
 end
 
 function physics_loop()
@@ -174,7 +174,6 @@ function draw_status_header()
   screen.text(current_env:upper())
   screen.move(60, 7)
   screen.level(4)
-  -- FIX: Access system tempo via clock_tempo
   local tempo = params:get("clock_tempo") or 120
   screen.text(math.floor(tempo) .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
   screen.move(110, 62)
