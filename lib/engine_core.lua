@@ -20,9 +20,9 @@ function EngineCore.apply_params(id, p)
   softcut.level(id, p.gain)
   softcut.rate(id, p.rate)
   
-  -- BALANCE FIX: Alternating hard-left/hard-right based on ID
-  -- Odd (1, 3, 5) -> Left (-width)
-  -- Even (2, 4, 6) -> Right (+width)
+  -- Panning Logic: 
+  -- Odd voices (1, 3, 5) -> Left (-width)
+  -- Even voices (2, 4, 6) -> Right (+width)
   local pan_val = (id % 2 == 0) and p.pan_width or -p.pan_width
   softcut.pan(id, util.clamp(pan_val, -1.0, 1.0))
 end
