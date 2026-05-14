@@ -6,7 +6,6 @@ function Physics.get_beat_sec()
     return 60 / params:get("bpm")
 end
 
--- Snaps a duration to the nearest beat/bar or master length
 function Physics.snap_to_interval(duration, interval)
     if interval <= 0 then return duration end
     local snapped = math.max(interval, math.floor((duration / interval) + 0.5) * interval)
