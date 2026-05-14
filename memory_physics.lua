@@ -56,44 +56,6 @@ function init()
   clock.run(audio_update_loop)
 end
 
-function start_recording()
-  rec_start_time = util.time()
-  softcut.position(1, 0)
-  softcut.rec(1, 1)
-  is_recording = true
-end
-
-function stop_recording()
-  local duration = util.time() - rec_start_time
-  local sync = params:get("sync_mode")
-  
-  if sync == 2 then duration = Phys.snap_to_interval(duration, Phys.get_beat_sec())
-  elseif sync == 3 then duration = Phys.snap_to_interval(duration, Phys.get_beat_sec() * 4) end
-  
-  if params:get("master_toggle") == 2 then
-    if master_duration == -1 then master_duration = duration 
-    else duration = Phys.snap_to_interval(duration, master_duration) end
-  end
-
-  softcut.loop_end(1, duration)
-  softcut.rec(1, 0)
-  is_recording = false
-end
-
-function advance_strata()
-  print("Strata Advanced")
-end
-
-function handle_event(idx, e)
-  if e.type == "bubble_pop" then
-    softcut.rate(idx, e.rate_shift)
-    clock.run(function() clock.sleep(0.1) softcut.rate(idx, 1.0) end)
-  elseif e.type == "seismic_crack" then
-    softcut.rec_level(idx, 1.4)
-    clock.run(function() clock.sleep(e.duration) softcut.rec_level(idx, 1.0) end)
-  end
-end
-
 function enc(n, d)
   if n == 1 then 
     params:delta("environment", d)
@@ -172,10 +134,16 @@ function draw_status_header()
   screen.level(10)
   screen.move(0, 7)
   screen.text(current_env:upper())
-  screen.move(60, 7)
+  
+  -- Mode Indicator (AUTO/MANUAL)
+  screen.move(128, 7)
+  screen.text_right(is_manual and "MANUAL" or "AUTO")
+
+  screen.move(64, 7)
   screen.level(4)
   local tempo = params:get("clock_tempo") or 120
-  screen.text(math.floor(tempo) .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
+  screen.text_center(math.floor(tempo) .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
+  
   screen.move(110, 62)
   screen.level(5)
   screen.text("W:" .. math.floor(weather_intensity * 100))
