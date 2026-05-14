@@ -9,7 +9,7 @@ function EngineCore.setup_voice(id, length)
   softcut.loop_end(id, length)
   softcut.play(id, 1)
   softcut.rec(id, 1)
-  softcut.rec_level(id, 1.0)
+  softcut.rec_level(id, 0.0) -- Start at zero until triggered
   softcut.pre_level(id, 0.75) 
   softcut.fade_time(id, 0.05)
 end
@@ -20,9 +20,7 @@ function EngineCore.apply_params(id, p)
   softcut.level(id, p.gain)
   softcut.rate(id, p.rate)
   
-  -- Panning Logic: 
-  -- Odd voices (1, 3, 5) -> Left (-width)
-  -- Even voices (2, 4, 6) -> Right (+width)
+  -- Balanced Panning
   local pan_val = (id % 2 == 0) and p.pan_width or -p.pan_width
   softcut.pan(id, util.clamp(pan_val, -1.0, 1.0))
 end
