@@ -1,13 +1,14 @@
 -- memory_physics
 -- Archaeology of Sound Prototype
 
+-- Libraries
 local Env = require "memory_physics/lib/environments"
 local Phys = require "memory_physics/lib/physics"
 local Soft = require "memory_physics/lib/engine_core"
 local UI = require "memory_physics/lib/ui_manager"
 
--- Global State Initialization
-layers = {} 
+-- GLOBAL STATE (Must be at the top)
+layers = {}
 active_layers = 6 
 excavation_pressure = 0
 weather_intensity = 0.25 
@@ -22,15 +23,16 @@ local master_duration = -1
 local key_2_down = false
 local key_3_down = false
 local silence_timer = 0
+local rec_start_time = 0
 
 function init()
-    -- Initialize the layers table
+    -- Initialize the layers table properly
     for i = 1, 6 do
         layers[i] = { voice = i, pressure_mem = 0, active = true }
         Soft.setup_voice(i, 60)
     end
     
-    -- Parameters
+    -- Parameters (These MUST be in init to show up in the menu)
     params:add_separator("ARCHAEOLOGY")
     params:add_option("mode", "Rec Mode", {"Auto", "Manual"}, 1)
     params:set_action("mode", function(x) is_manual = (x == 2) end)
@@ -43,7 +45,7 @@ function init()
     params:add_option("environment", "Environment", Env.list, 3)
     params:set_action("environment", function(x) current_env = Env.list[x] end)
 
-    -- Input Poll for Auto-Advance
+    -- Start Poll
     poll_input = poll.set("amp_in_l")
     poll_input.callback = function(val)
         if not is_manual and not is_recording then
@@ -54,28 +56,40 @@ function init()
     end
     poll_input:start()
 
+    -- Start Loops
     clock.run(physics_loop)
     clock.run(audio_update_loop)
 end
 
 function start_recording()
     rec_start_time = util.time()
-    softcut.position(1, 0) -- Always record to the "surface"
+    softcut.position(1, 0) 
     softcut.rec(1, 1)
     is_recording = true
 end
 
 function stop_recording()
     local duration = util.time() - rec_start_time
-    -- (Timing logic omitted for brevity, refer to previous version for full sync math)
+    local sync = params:get("sync_mode")
+    
+    -- Sync Logic
+    if sync == 2 then duration = Phys.snap_to_interval(duration, Phys.get_beat_sec())
+    elseif sync == 3 then duration = Phys.snap_to_interval(duration, Phys.get_beat_sec() * 4) end
+    
+    if params:get("master_toggle") == 2 then
+        if master_duration == -1 then master_duration = duration 
+        else duration = Phys.snap_to_interval(duration, master_duration) end
+    end
+
+    softcut.loop_end(1, duration)
     softcut.rec(1, 0)
     is_recording = false
     advance_strata()
 end
 
 function advance_strata()
-    -- Logic to shift buffer contents or focus down
-    print("Strata Advanced")
+    -- Shifts the top layer into the history
+    print("New Layer Buried")
 end
 
 function handle_event(idx, e)
@@ -98,12 +112,14 @@ function key(n, z)
     if n == 1 then alt_held = (z == 1) end
     if n == 2 then key_2_down = (z == 1) end
     if n == 3 then key_3_down = (z == 1) end
+
     if z == 1 and key_2_down and key_3_down then
         excavation_pressure = 0
         weather_intensity = 0.25
         master_duration = -1
         return
     end
+
     if z == 1 then
         if alt_held then
             if n == 2 then show_help = not show_help
