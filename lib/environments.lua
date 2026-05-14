@@ -1,69 +1,88 @@
 local Environments = {}
 
--- The list of keys used by the Norns params menu
-Environments.list = {"forest", "deep_sea", "desert", "mountain", "swamp", "cave"}
+Environments.list = {"sand", "mountain", "grove", "river_bank", "sea"}
 
--- DSP and Physics profiles for each biome
 Environments.data = {
-  forest = {
-    base_fc = 12000, mod_fc = 8000, 
-    base_rq = 2.0, mod_rq = 4.0, 
-    gain_scale = 0.8, noise_type = "rustle"
-  },
-  deep_sea = {
-    base_fc = 800, mod_fc = 600, 
-    base_rq = 5.0, mod_rq = 2.0, 
-    gain_scale = 0.4, noise_type = "pressure"
-  },
-  desert = {
-    base_fc = 15000, mod_fc = 12000, 
-    base_rq = 1.4, mod_rq = 5.0, 
-    gain_scale = 0.7, noise_type = "wind"
+  sand = {
+    base_fc = 16000, mod_fc = 15500, base_rq = 1.5, mod_rq = 6.0,
+    drift = 0.08, flavor = "granular_sand"
   },
   mountain = {
-    base_fc = 3000, mod_fc = 2500, 
-    base_rq = 8.0, mod_rq = 1.0, 
-    gain_scale = 0.6, noise_type = "crackle"
+    base_fc = 4000, mod_fc = 3800, base_rq = 2.0, mod_rq = 12.0,
+    drift = 0.02, flavor = "seismic"
   },
-  swamp = {
-    base_fc = 2000, mod_fc = 1800, 
-    base_rq = 3.0, mod_rq = 6.0, 
-    gain_scale = 0.5, noise_type = "bubbles"
+  grove = {
+    base_fc = 8000, mod_fc = 7500, base_rq = 1.2, mod_rq = 3.0,
+    drift = 0.005, flavor = "damp"
   },
-  cave = {
-    base_fc = 5000, mod_fc = 4500, 
-    base_rq = 1.2, mod_rq = 0.5, 
-    gain_scale = 0.9, noise_type = "echo"
+  river_bank = {
+    base_fc = 12000, mod_fc = 11000, base_rq = 1.0, mod_rq = 2.5,
+    drift = 0.01, flavor = "flood"
+  },
+  sea = {
+    base_fc = 5000, mod_fc = 4600, base_rq = 1.5, mod_rq = 8.0,
+    drift = 0.04, flavor = "submarine"
   }
 }
 
--- Returns a table of parameters for Softcut/DaisySP
 function Environments.get_params(env_name, pressure, layer_idx)
-  local d = Environments.data[env_name] or Environments.data["forest"]
-  local p_sq = pressure * pressure
-  
-  -- Logic: Higher pressure usually reduces cutoff (burying the sound)
-  -- and increases resonance (narrowing the focus)
-  return {
-    cutoff = math.max(20, d.base_fc - (p_sq * d.mod_fc)),
-    rq = d.base_rq + (p_sq * d.mod_rq),
-    gain = d.gain_scale - (pressure * 0.2)
-  }
+    local d = Environments.data[env_name] or Environments.data["grove"]
+    local p_sq = pressure * pressure
+    local cutoff = 0
+    local gain_mod = 0
+    
+    if env_name == "sand" or env_name == "mountain" then
+        -- High Pass to Low Pass Transition
+        cutoff = math.max(40, d.base_fc - (pressure * d.mod_fc))
+    elseif env_name == "river_bank" then
+        -- The Flood: Gain swells slightly with pressure before the wash-out
+        gain_mod = math.sin(pressure * math.pi) * 0.2
+        cutoff = d.base_fc - (p_sq * d.mod_fc)
+    elseif env_name == "sea" then
+        -- Sea: Breezy Bandpass (surface) to Submerged LPF (pressure)
+        cutoff = d.base_fc - (p_sq * d.mod_fc)
+    else
+        cutoff = d.base_fc - (p_sq * d.mod_fc)
+    end
+
+    return {
+        cutoff = safe_clamp(cutoff, 20, 20000),
+        rq = d.base_rq + (p_sq * d.mod_rq),
+        gain = (0.9 + gain_mod) - (pressure * 0.4),
+        -- Rate creates "thrashing waves" in the Sea or "seismic jitter" in Mountain
+        rate = 1.0 + (math.sin(util.time() * (d.drift * 25)) * (pressure * d.drift))
+    }
 end
 
--- Logic for random "archeological" glitches/events
 function Environments.get_random_event(env_name, pressure)
-  -- Global dropout chance based on high pressure
-  if pressure > 0.8 and math.random() < 0.02 then
-    return {type = "dropout", duration = math.random(5, 15) / 100}
-  end
-  
-  -- Biome specific events
-  if env_name == "cave" and pressure > 0.6 and math.random() < 0.01 then
-    return {type = "jump"} -- Random playhead jump
-  end
-  
-  return nil
+    local chance = math.random()
+    
+    -- Sea: Thrashing Waves / Choppy Granular
+    if env_name == "sea" and pressure > 0.4 and chance < 0.08 then
+        -- Random choppy rate shifts
+        return {type = "choppy_wave", rate_mult = 0.5 + math.random()}
+    end
+    
+    -- River Bank: The Flood / Splashy wash
+    if env_name == "river_bank" and pressure > 0.7 and chance < 0.05 then
+        return {type = "washout", duration = 0.6}
+    end
+
+    -- Mountain: Seismic Avalanches
+    if env_name == "mountain" and pressure > 0.8 and chance < 0.04 then
+        return {type = "seismic_crack", duration = 0.4}
+    end
+    
+    -- Sand: Granular fragments
+    if env_name == "sand" and pressure < 0.3 and chance < 0.1 then
+        return {type = "grain_scatter", duration = 0.1}
+    end
+    
+    return nil
+end
+
+function safe_clamp(val, min, max)
+    return math.max(min, math.min(max, val))
 end
 
 return Environments
