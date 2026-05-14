@@ -37,7 +37,7 @@ function start_recording()
   softcut.position(1, 0)
   softcut.rec(1, 1)
   is_recording = true
-  redraw()
+  redraw() -- Update UI to show REC
 end
 
 function stop_recording()
@@ -56,7 +56,7 @@ function stop_recording()
   softcut.rec(1, 0)
   is_recording = false
   advance_strata()
-  redraw()
+  redraw() -- Update UI to hide REC
 end
 
 function handle_event(idx, e)
@@ -172,24 +172,29 @@ function redraw()
 end
 
 function draw_status_header()
+  -- Environment Name
   screen.level(10)
   screen.move(0, 7)
   screen.text(current_env:upper())
   
+  -- Mode Indicator
   screen.move(128, 7)
   screen.text_right(is_manual and "MANUAL" or "AUTO")
 
+  -- Recording Indicator
   if is_recording then
     screen.level(15)
     screen.move(128, 17)
     screen.text_right("● REC")
   end
 
+  -- BPM/Sync
   screen.move(64, 7)
   screen.level(4)
   local tempo = params:get("clock_tempo") or 120
   screen.text_center(math.floor(tempo) .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
   
+  -- Weather
   screen.move(110, 62)
   screen.level(5)
   screen.text("W:" .. math.floor(weather_intensity * 100))
