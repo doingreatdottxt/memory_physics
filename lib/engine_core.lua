@@ -9,9 +9,9 @@ function EngineCore.setup_voice(id, length)
   softcut.loop_end(id, length)
   softcut.play(id, 1)
   softcut.rec(id, 1)
-  softcut.rec_level(id, 1.0)
-  softcut.pre_level(id, 0.75) 
-  softcut.fade_time(id, 0.05)
+  softcut.rec_level(id, 0.0) -- Controlled by recording logic
+  softcut.pre_level(id, 0.75) -- Subtle decay of old "strata"
+  softcut.fade_time(id, 0.1)
 end
 
 function EngineCore.apply_params(id, p)
