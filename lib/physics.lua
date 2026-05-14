@@ -1,16 +1,17 @@
 local Physics = {}
 
-function Physics.calculate_layer_depth(i, active_layers)
-    if active_layers <= 1 then return 0 end
-    return 0.25 + ((i - 1) / (active_layers - 1) * 0.75)
+function Physics.calculate_layer_depth(i, total_active)
+    if total_active <= 1 then return i == 1 and 1 or 0 end
+    return (i - 1) / (total_active - 1)
 end
 
-function Physics.update_pressure_memory(current, target, rate)
-    return util.clamp(current + (target * rate), 0, 1)
+function Physics.interpolate(current, target, amt)
+    return current + (target - current) * amt
 end
 
-function Physics.calculate_decay_chance(i, excavation_pressure)
-    return 0.08 + (i * 0.08) + (excavation_pressure * 0.2)
+function Physics.get_decay_rate(pressure)
+    -- Higher pressure = faster "erosion" of the sound
+    return 0.01 + (pressure * 0.05)
 end
 
 return Physics
