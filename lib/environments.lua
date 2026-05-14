@@ -13,7 +13,7 @@ Environments.data = {
 }
 
 function Environments.get_params(env_name, pressure, layer_idx, weather)
-  local d = Environments.data[env_name] or Environments.data["Grove"]
+  local d = [Environments.data[env_name]](https://github.com/doingreatdottxt/memory_physics/blob/main/lib/environments.lua) or Environments.data["Grove"]
   local p_sq = pressure * pressure
   local layer_weather = weather * (0.5 ^ (layer_idx - 1))
   
@@ -24,7 +24,8 @@ function Environments.get_params(env_name, pressure, layer_idx, weather)
     rq = d.base_rq + (p_sq * d.mod_rq),
     gain = 0.9 - (pressure * 0.4),
     rate = 1.0 + (math.sin(util.time() * (d.drift * 25)) * (layer_weather * d.drift)),
-    pan_width = 1.0 - (pressure * 0.8)
+    -- PAN FIX: Minimum width of 0.3 to prevent mono-clumping
+    pan_width = math.max(0.3, 1.0 - (pressure * 0.7))
   }
 end
 
