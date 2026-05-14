@@ -9,7 +9,7 @@ local UI = require "memory_physics/lib/ui_manager"
 -- Performance State
 active_layers = 6 
 excavation_pressure = 0
-weather_intensity = 0.25 -- Default 25% "Standard Breeze"
+weather_intensity = 0.25 -- 25% Standard Breeze
 current_env = "grove"
 
 -- System State
@@ -35,21 +35,9 @@ function init()
     params:add_separator("TIMING")
     params:add_option("sync_mode", "Sync", {"Free", "Beat", "Bar"}, 1)
     params:add_option("master_toggle", "Master Sync", {"Off", "On"}, 2)
-    params:add_control("silence_time", "Silence Time", controlspec.new(0.5, 10, "lin", 0.1, 2))
 
     params:add_option("environment", "Environment", Env.list, 3)
     params:set_action("environment", function(x) current_env = Env.list[x] end)
-
-    -- Input Poll for Auto-Advance
-    poll_input = poll.set("amp_in_l")
-    poll_input.callback = function(val)
-        if not is_manual and not is_recording then
-            local triggered, new_timer = Phys.process_silence(val, 0.1, silence_timer, params:get("silence_time"))
-            silence_timer = new_timer
-            if triggered then advance_strata() end
-        end
-    end
-    poll_input:start()
 
     clock.run(physics_loop)
     clock.run(audio_update_loop)
@@ -71,8 +59,6 @@ end
 
 function key(n, z)
     if n == 1 then alt_held = (z == 1) end
-    
-    -- Track key states for chords
     if n == 2 then key_2_down = (z == 1) end
     if n == 3 then key_3_down = (z == 1) end
 
@@ -81,7 +67,6 @@ function key(n, z)
         excavation_pressure = 0
         weather_intensity = 0.25
         master_duration = -1
-        print("SYSTEM RESET")
         return
     end
 
@@ -100,7 +85,7 @@ function key(n, z)
 end
 
 ---------------------------------------------------------
--- WEATHER & PHYSICS LOOPS
+-- LOOPS
 ---------------------------------------------------------
 
 function physics_loop()
@@ -110,7 +95,7 @@ function physics_loop()
             local depth = Phys.calculate_layer_depth(i, active_layers)
             l.pressure_mem = Phys.interpolate(l.pressure_mem, excavation_pressure * depth, 0.1)
             
-            -- Trigger random biome events scaled by weather and depth
+            -- Pass weather and index for depth-attenuated probability
             local event = Env.get_random_event(current_env, l.pressure_mem, i, weather_intensity)
             if event then handle_event(i, event) end
         end
@@ -133,17 +118,21 @@ function redraw()
         draw_help_screen()
     else
         UI.draw_layers(layers, active_layers, excavation_pressure)
-        
-        -- Weather Bar Visual
-        screen.level(2)
-        screen.rect(122, 15, 2, 40)
-        screen.stroke()
-        screen.level(5)
-        local bar_h = math.floor(weather_intensity * 40)
-        screen.rect(122, 55 - bar_h, 2, bar_h)
-        screen.fill()
-        
         draw_status_header()
     end
     screen.update()
+end
+
+function draw_status_header()
+    screen.level(10)
+    screen.move(0, 7)
+    screen.text(current_env:upper())
+    
+    screen.move(60, 7)
+    screen.level(4)
+    screen.text(params:get("bpm") .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
+    
+    screen.move(110, 62)
+    screen.level(5)
+    screen.text("W:" .. math.floor(weather_intensity * 100))
 end
