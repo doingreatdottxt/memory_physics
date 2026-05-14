@@ -1,39 +1,48 @@
-local UI = {}
+local UIManager = {}
 
-function UI.draw_background(env_name)
-    screen.level(1)
-    -- Subtle environmental indicators (e.g., a horizon line)
-    screen.move(0, 40)
-    screen.line(128, 40)
-    screen.stroke()
-end
-
-function UI.draw_layers(layers, active_count, pressure)
-    for i=1, active_count do
-        local l = layers[i]
-        local y_pos = 10 + (i * 8)
+function UIManager.draw_layers(layers, active_count, global_pressure)
+    for i = 1, 6 do
+        local y = 15 + (i * 7)
+        local p = layers[i].pressure_mem
         
-        -- Draw "Bedrock" or "Soil" lines based on pressure
-        screen.level(l.active and 15 or 2)
-        screen.move(10, y_pos)
-        
-        -- The line length fluctuates based on layer pressure
-        local line_end = 10 + (l.pressure_mem * 100)
-        screen.line(line_end, y_pos)
+        -- Draw Strata Line
+        screen.level(math.floor(p * 10) + 2)
+        screen.move(10, y)
+        screen.line(110, y)
         screen.stroke()
         
-        -- If a layer is in "dropout", draw a flicker
-        if l.is_dropout then
-            screen.pixel(line_end + 2, y_pos)
+        -- Draw "Fossil" Activity Indicator
+        if i <= active_count then
+            screen.level(15)
+            screen.pixel(12 + (math.sin(util.time() + i) * 2), y)
             screen.fill()
         end
     end
-end
-
-function UI.draw_pressure_gauge(pressure)
-    screen.level(5)
-    screen.rect(120, 64, 4, -(pressure * 64))
+    
+    -- Global Pressure Bar (Vertical)
+    screen.level(1)
+    screen.rect(115, 15, 3, 42)
+    screen.stroke()
+    screen.level(math.floor(global_pressure * 15))
+    local p_h = math.floor(global_pressure * 42)
+    screen.rect(115, 57 - p_h, 3, p_h)
     screen.fill()
 end
 
-return UI
+function UIManager.draw_help(is_manual)
+    screen.clear()
+    screen.level(15)
+    screen.move(0, 10)
+    screen.text("ARCHAEOLOGY HELP")
+    screen.level(4)
+    screen.move(0, 25)
+    screen.text("K3: Toggle Auto/Manual")
+    screen.move(0, 35)
+    screen.text("K1+K3: Cycle Sync")
+    screen.move(0, 45)
+    screen.text("K2+K3: SYSTEM RESET")
+    screen.move(0, 55)
+    screen.text("K1+K2: Exit Help")
+end
+
+return UIManager
