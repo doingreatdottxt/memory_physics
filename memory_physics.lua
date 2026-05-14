@@ -24,13 +24,36 @@ local key_3_down = false
 local silence_timer = 0
 local rec_start_time = 0
 
----------------------------------------------------------
--- HELPER FUNCTIONS (Defined before init to avoid nil) --
----------------------------------------------------------
+function init()
+  for i = 1, 6 do
+    layers[i] = { voice = i, pressure_mem = 0, active = true }
+    Soft.setup_voice(i, 60)
+  end
 
-function advance_strata()
-  print("Strata Advanced")
-  -- Add your logic for shifting layers or changing states here
+  params:add_separator("ARCHAEOLOGY")
+  params:add_option("mode", "Rec Mode", {"Auto", "Manual"}, 1)
+  params:set_action("mode", function(x) is_manual = (x == 2) end)
+
+  params:add_separator("TIMING")
+  params:add_option("sync_mode", "Sync", {"Free", "Beat", "Bar"}, 1)
+  params:add_option("master_toggle", "Master Sync", {"Off", "On"}, 2)
+  params:add_control("silence_time", "Silence Time", controlspec.new(0.5, 10, "lin", 0.1, 2))
+
+  params:add_option("environment", "Environment", Env.list, 3) -- Default to Grove
+  params:set_action("environment", function(x) current_env = Env.list[x] end)
+
+  poll_input = poll.set("amp_in_l")
+  poll_input.callback = function(val)
+    if not is_manual and not is_recording then
+      local triggered, new_timer = Phys.process_silence(val, 0.1, silence_timer, params:get("silence_time"))
+      silence_timer = new_timer
+      if triggered then advance_strata() end
+    end
+  end
+  poll_input:start()
+
+  clock.run(physics_loop)
+  clock.run(audio_update_loop)
 end
 
 function start_recording()
@@ -55,7 +78,10 @@ function stop_recording()
   softcut.loop_end(1, duration)
   softcut.rec(1, 0)
   is_recording = false
-  advance_strata()
+end
+
+function advance_strata()
+  print("Strata Advanced")
 end
 
 function handle_event(idx, e)
@@ -68,51 +94,10 @@ function handle_event(idx, e)
   end
 end
 
----------------------------------------------------------
--- CORE NORNS FUNCTIONS                                --
----------------------------------------------------------
-
-function init()
-  for i = 1, 6 do
-    layers[i] = { voice = i, pressure_mem = 0, active = true }
-    Soft.setup_voice(i, 60)
-  end
-
-  params:add_separator("ARCHAEOLOGY")
-  params:add_option("mode", "Rec Mode", {"Auto", "Manual"}, 1)
-  params:set_action("mode", function(x) is_manual = (x == 2) end)
-
-  params:add_separator("TIMING")
-  params:add_option("sync_mode", "Sync", {"Free", "Beat", "Bar"}, 1)
-  params:add_option("master_toggle", "Master Sync", {"Off", "On"}, 2)
-  params:add_control("silence_time", "Silence Time", controlspec.new(0.5, 10, "lin", 0.1, 2))
-
-  params:add_option("environment", "Environment", Env.list, 3) 
-  params:set_action("environment", function(x) current_env = Env.list[x] end)
-
-  poll_input = poll.set("amp_in_l")
-  poll_input.callback = function(val)
-    if not is_manual and not is_recording then
-      local triggered, new_timer = Phys.process_silence(val, 0.1, silence_timer, params:get("silence_time"))
-      silence_timer = new_timer
-      if triggered then advance_strata() end
-    end
-  end
-  poll_input:start()
-
-  clock.run(physics_loop)
-  clock.run(audio_update_loop)
-end
-
 function enc(n, d)
-  if n == 1 then 
-    params:delta("environment", d)
-  elseif n == 2 then 
-    weather_intensity = util.clamp(weather_intensity + (d/100), 0, 1)
-  elseif n == 3 then 
-    excavation_pressure = util.clamp(excavation_pressure + (d/100), 0, 1) 
-  end
-  redraw() 
+  if n == 1 then params:delta("environment", d)
+  elseif n == 2 then weather_intensity = util.clamp(weather_intensity + (d/100), 0, 1)
+  elseif n == 3 then excavation_pressure = util.clamp(excavation_pressure + (d/100), 0, 1) end
 end
 
 function key(n, z)
@@ -124,7 +109,6 @@ function key(n, z)
     excavation_pressure = 0
     weather_intensity = 0.25
     master_duration = -1
-    redraw()
     return
   end
 
@@ -140,7 +124,6 @@ function key(n, z)
       end
     end
   end
-  redraw()
 end
 
 function physics_loop()
@@ -182,16 +165,9 @@ function draw_status_header()
   screen.level(10)
   screen.move(0, 7)
   screen.text(current_env:upper())
-  
-  -- Mode Indicator
-  screen.move(128, 7)
-  screen.text_right(is_manual and "MANUAL" or "AUTO")
-
-  screen.move(64, 7)
+  screen.move(60, 7)
   screen.level(4)
-  local tempo = params:get("clock_tempo") or 120
-  screen.text_center(math.floor(tempo) .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
-  
+  screen.text(params:get("bpm") .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
   screen.move(110, 62)
   screen.level(5)
   screen.text("W:" .. math.floor(weather_intensity * 100))
