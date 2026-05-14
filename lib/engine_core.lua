@@ -15,15 +15,15 @@ function EngineCore.setup_voice(id, length)
     softcut.play(id, 1)
     softcut.rec(id, 1)
     
-    -- Layer Cake/Consumption defaults
+    -- Consumption/Persistence defaults
     softcut.rec_level(id, 1.0)
-    softcut.pre_level(id, 0.75) -- The "Persistence" of the memory
+    softcut.pre_level(id, 0.75) 
     
     softcut.post_filter_lp(id, 1.0)
     softcut.post_filter_fc(id, 12000)
+    softcut.fade_time(id, 0.05)
 end
 
--- New logic: Bouncing filtered audio back into the buffer for permanent mutation
 function EngineCore.mutate_strata(id, feedback_amt)
     softcut.pre_level(id, feedback_amt)
 end
@@ -33,10 +33,12 @@ function EngineCore.apply_params(id, p)
     softcut.post_filter_fc(id, safe_fc)
     softcut.post_filter_rq(id, p.rq)
     softcut.level(id, p.gain)
+    softcut.rate(id, p.rate or 1.0)
     
-    -- Stereo Narrowing (for Layer Cake Mode)
+    -- Stereo Narrowing: Deeper layers collapse to mono
     if p.pan_width then
-        softcut.pan(id, (id % 2 == 0) and p.pan_width or -p.pan_width)
+        local pan = (id % 2 == 0) and p.pan_width or -p.pan_width
+        softcut.pan(id, pan)
     end
 end
 
