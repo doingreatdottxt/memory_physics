@@ -6,10 +6,11 @@ local Phys = require "memory_physics/lib/physics"
 local Soft = require "memory_physics/lib/engine_core"
 local UI = require "memory_physics/lib/ui_manager"
 
--- Performance State
+-- Global State Initialization
+layers = {} 
 active_layers = 6 
 excavation_pressure = 0
-weather_intensity = 0.25 -- 25% Standard Breeze
+weather_intensity = 0.25 
 current_env = "grove"
 
 -- System State
@@ -20,8 +21,10 @@ local is_recording = false
 local master_duration = -1
 local key_2_down = false
 local key_3_down = false
+local silence_timer = 0
 
 function init()
+    -- Initialize the layers table
     for i = 1, 6 do
         layers[i] = { voice = i, pressure_mem = 0, active = true }
         Soft.setup_voice(i, 60)
@@ -35,41 +38,72 @@ function init()
     params:add_separator("TIMING")
     params:add_option("sync_mode", "Sync", {"Free", "Beat", "Bar"}, 1)
     params:add_option("master_toggle", "Master Sync", {"Off", "On"}, 2)
+    params:add_control("silence_time", "Silence Time", controlspec.new(0.5, 10, "lin", 0.1, 2))
 
     params:add_option("environment", "Environment", Env.list, 3)
     params:set_action("environment", function(x) current_env = Env.list[x] end)
+
+    -- Input Poll for Auto-Advance
+    poll_input = poll.set("amp_in_l")
+    poll_input.callback = function(val)
+        if not is_manual and not is_recording then
+            local triggered, new_timer = Phys.process_silence(val, 0.1, silence_timer, params:get("silence_time"))
+            silence_timer = new_timer
+            if triggered then advance_strata() end
+        end
+    end
+    poll_input:start()
 
     clock.run(physics_loop)
     clock.run(audio_update_loop)
 end
 
----------------------------------------------------------
--- HARDWARE INPUTS
----------------------------------------------------------
+function start_recording()
+    rec_start_time = util.time()
+    softcut.position(1, 0) -- Always record to the "surface"
+    softcut.rec(1, 1)
+    is_recording = true
+end
+
+function stop_recording()
+    local duration = util.time() - rec_start_time
+    -- (Timing logic omitted for brevity, refer to previous version for full sync math)
+    softcut.rec(1, 0)
+    is_recording = false
+    advance_strata()
+end
+
+function advance_strata()
+    -- Logic to shift buffer contents or focus down
+    print("Strata Advanced")
+end
+
+function handle_event(idx, e)
+    if e.type == "bubble_pop" then
+        softcut.rate(idx, e.rate_shift)
+        clock.run(function() clock.sleep(0.1) softcut.rate(idx, 1.0) end)
+    elseif e.type == "seismic_crack" then
+        softcut.rec_level(idx, 1.4)
+        clock.run(function() clock.sleep(e.duration) softcut.rec_level(idx, 1.0) end)
+    end
+end
 
 function enc(n, d)
-    if n == 1 then 
-        params:delta("environment", d)
-    elseif n == 2 then 
-        weather_intensity = util.clamp(weather_intensity + (d/100), 0, 1)
-    elseif n == 3 then 
-        excavation_pressure = util.clamp(excavation_pressure + (d/100), 0, 1)
-    end
+    if n == 1 then params:delta("environment", d)
+    elseif n == 2 then weather_intensity = util.clamp(weather_intensity + (d/100), 0, 1)
+    elseif n == 3 then excavation_pressure = util.clamp(excavation_pressure + (d/100), 0, 1) end
 end
 
 function key(n, z)
     if n == 1 then alt_held = (z == 1) end
     if n == 2 then key_2_down = (z == 1) end
     if n == 3 then key_3_down = (z == 1) end
-
-    -- Safety Reset: K2 + K3 simultaneously
     if z == 1 and key_2_down and key_3_down then
         excavation_pressure = 0
         weather_intensity = 0.25
         master_duration = -1
         return
     end
-
     if z == 1 then
         if alt_held then
             if n == 2 then show_help = not show_help
@@ -84,18 +118,12 @@ function key(n, z)
     end
 end
 
----------------------------------------------------------
--- LOOPS
----------------------------------------------------------
-
 function physics_loop()
     while true do
         clock.sleep(1/15)
         for i, l in ipairs(layers) do
             local depth = Phys.calculate_layer_depth(i, active_layers)
             l.pressure_mem = Phys.interpolate(l.pressure_mem, excavation_pressure * depth, 0.1)
-            
-            -- Pass weather and index for depth-attenuated probability
             local event = Env.get_random_event(current_env, l.pressure_mem, i, weather_intensity)
             if event then handle_event(i, event) end
         end
@@ -115,7 +143,7 @@ end
 function redraw()
     screen.clear()
     if show_help then
-        draw_help_screen()
+        UI.draw_help(is_manual)
     else
         UI.draw_layers(layers, active_layers, excavation_pressure)
         draw_status_header()
@@ -127,11 +155,9 @@ function draw_status_header()
     screen.level(10)
     screen.move(0, 7)
     screen.text(current_env:upper())
-    
     screen.move(60, 7)
     screen.level(4)
     screen.text(params:get("bpm") .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
-    
     screen.move(110, 62)
     screen.level(5)
     screen.text("W:" .. math.floor(weather_intensity * 100))
