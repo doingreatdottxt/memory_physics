@@ -23,10 +23,7 @@ function Physics.process_silence(input_level, dt, timer, limit)
         timer = 0
     end
     local trigger = false
-    if timer > limit then
-        trigger = true
-        timer = 0 
-    end
+    if timer > limit then trigger = true timer = 0 end
     return trigger, timer
 end
 
