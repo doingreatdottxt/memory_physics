@@ -17,18 +17,21 @@ function Environments.get_params(env_name, pressure, layer_idx, weather)
   local p_sq = pressure * pressure
   local layer_weather = weather * (0.5 ^ (layer_idx - 1))
   
+  local cutoff = d.base_fc - (p_sq * d.mod_fc)
+  
   return {
-    cutoff = math.max(20, math.min(20000, d.base_fc - (p_sq * d.mod_fc))),
+    cutoff = math.max(20, math.min(20000, cutoff)),
     rq = d.base_rq + (p_sq * d.mod_rq),
     gain = 0.9 - (pressure * 0.4),
     rate = 1.0 + (math.sin(util.time() * (d.drift * 25)) * (layer_weather * d.drift)),
-    pan_width = math.max(0.3, 1.0 - (pressure * 0.7))
+    pan_width = 1.0 - (pressure * 0.8)
   }
 end
 
 function Environments.get_random_event(env_name, pressure, layer_idx, weather)
   local layer_weather = weather * (0.5 ^ (layer_idx - 1))
   if math.random() > (layer_weather * 0.2) then return nil end
+
   if env_name == "Swamp" then
     return {type = "bubble_pop", rate_shift = 0.8 + (math.random() * 0.4)}
   elseif env_name == "Mountain" and pressure > 0.8 then
