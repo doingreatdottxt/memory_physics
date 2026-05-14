@@ -1,5 +1,4 @@
 local Physics = {}
-
 Physics.SILENCE_THRESHOLD = 0.02 
 
 function Physics.get_beat_sec()
@@ -23,13 +22,11 @@ function Physics.process_silence(input_level, dt, timer, limit)
     else
         timer = 0
     end
-    
     local trigger = false
     if timer > limit then
         trigger = true
         timer = 0 
     end
-    
     return trigger, timer
 end
 
