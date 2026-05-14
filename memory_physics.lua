@@ -1,5 +1,12 @@
 -- memory_physics
--- archaeology of sound
+-- ENC 1: Biome 
+-- ENC 2: Weather (Agitates top layers)
+-- ENC 3: Pressure (Buries audio into bedrock)
+
+-- K3: Toggle Auto/Manual Record Mode
+-- K2: Record / Finish Phrase (Manual Only)
+-- K1 + K3: Cycle Sync (Free / Beat / Bar)
+-- K2 + K3: HARD RESET (Clear Pressure & Master Sync)
 
 local Env = require "memory_physics/lib/environments"
 local Phys = require "memory_physics/lib/physics"
@@ -39,7 +46,7 @@ function init()
   params:add_option("master_toggle", "Master Sync", {"Off", "On"}, 2)
   params:add_control("silence_time", "Silence Time", controlspec.new(0.5, 10, "lin", 0.1, 2))
 
-  params:add_option("environment", "Environment", Env.list, 3) -- Default to Grove
+  params:add_option("environment", "Environment", Env.list, 3) 
   params:set_action("environment", function(x) current_env = Env.list[x] end)
 
   poll_input = poll.set("amp_in_l")
@@ -167,7 +174,9 @@ function draw_status_header()
   screen.text(current_env:upper())
   screen.move(60, 7)
   screen.level(4)
-  screen.text(params:get("clock_tempo") .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
+  -- FIX: Access system tempo via clock_tempo
+  local tempo = params:get("clock_tempo") or 120
+  screen.text(math.floor(tempo) .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
   screen.move(110, 62)
   screen.level(5)
   screen.text("W:" .. math.floor(weather_intensity * 100))
