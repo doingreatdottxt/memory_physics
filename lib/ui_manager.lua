@@ -32,7 +32,7 @@ function UIManager.draw_help(is_manual)
   screen.move(0, 25); screen.text("K3: Toggle Auto/Manual")
   screen.move(0, 35); screen.text("K1+K3: Cycle Sync")
   screen.move(0, 45); screen.text("K2+K3: RESET")
-  screen.move(0, 55); screen.text("K1+K2: Exit")
+  screen.move(0, 55); screen.text(is_manual and "K2: START/STOP REC" or "AUTO: AUDIO TRIGGERED")
 end
 
 return UIManager
