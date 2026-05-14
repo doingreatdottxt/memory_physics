@@ -19,20 +19,25 @@ local show_help = false
 local is_manual = false
 local is_recording = false
 local silence_timer = 0
+local rec_start_time = 0
 
 function advance_strata()
   print("Strata Advanced")
 end
 
 function start_recording()
+  rec_start_time = util.time()
   softcut.position(1, 0)
   softcut.rec(1, 1)
+  softcut.rec_level(1, 1.0) -- Ensure recording level is up
   is_recording = true
   redraw()
 end
 
 function stop_recording()
+  local duration = util.time() - rec_start_time
   softcut.rec(1, 0)
+  softcut.loop_end(1, math.max(0.1, duration))
   is_recording = false
   advance_strata()
   redraw()
@@ -67,7 +72,7 @@ function init()
       if val > 0.05 and not is_recording then
         start_recording()
       elseif is_recording then
-        local triggered, new_timer = Phys.process_silence(val, 0.1, silence_timer, params:get("silence_time"))
+        local triggered, new_timer = Phys.process_silence(val, 0.1, silence_timer, 2.0)
         silence_timer = new_timer
         if triggered then stop_recording() end
       end
@@ -126,13 +131,11 @@ end
 
 function redraw()
   screen.clear()
-  if layers and #layers > 0 then
-    if show_help then
-      UI.draw_help(is_manual)
-    else
-      UI.draw_layers(layers, active_layers, excavation_pressure)
-      draw_status_header()
-    end
+  if show_help then
+    UI.draw_help(is_manual)
+  else
+    UI.draw_layers(layers, active_layers, excavation_pressure)
+    draw_status_header()
   end
   screen.update()
 end
