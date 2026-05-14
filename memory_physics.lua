@@ -38,6 +38,16 @@ function stop_recording()
   redraw()
 end
 
+function handle_event(idx, e)
+  if e.type == "bubble_pop" then
+    softcut.rate(idx, e.rate_shift)
+    clock.run(function() clock.sleep(0.1) softcut.rate(idx, 1.0) end)
+  elseif e.type == "seismic_crack" then
+    softcut.rec_level(idx, 1.4)
+    clock.run(function() clock.sleep(e.duration) softcut.rec_level(idx, 1.0) end)
+  end
+end
+
 function init()
   for i = 1, 6 do
     layers[i] = { voice = i, pressure_mem = 0, active = true }
@@ -67,6 +77,29 @@ function init()
 
   clock.run(physics_loop)
   clock.run(audio_update_loop)
+end
+
+function enc(n, d)
+  if n == 1 then params:delta("environment", d)
+  elseif n == 2 then weather_intensity = util.clamp(weather_intensity + (d/100), 0, 1)
+  elseif n == 3 then excavation_pressure = util.clamp(excavation_pressure + (d/100), 0, 1) end
+  redraw()
+end
+
+function key(n, z)
+  if n == 1 then alt_held = (z == 1) end
+  if z == 1 then
+    if alt_held then
+      if n == 2 then show_help = not show_help end
+    else
+      if n == 2 and is_manual then
+        if not is_recording then start_recording() else stop_recording() end
+      elseif n == 3 then
+        params:set("mode", (params:get("mode") % 2) + 1)
+      end
+    end
+  end
+  redraw()
 end
 
 function physics_loop()
@@ -115,5 +148,7 @@ function draw_status_header()
     screen.move(128, 17)
     screen.text_right("● REC")
   end
-  screen.update()
+  screen.move(110, 62)
+  screen.level(5)
+  screen.text("W:" .. math.floor(weather_intensity * 100))
 end
