@@ -24,36 +24,12 @@ local key_3_down = false
 local silence_timer = 0
 local rec_start_time = 0
 
-function init()
-  for i = 1, 6 do
-    layers[i] = { voice = i, pressure_mem = 0, active = true }
-    Soft.setup_voice(i, 60)
-  end
+---------------------------------------------------------
+-- HELPER FUNCTIONS                                    --
+---------------------------------------------------------
 
-  params:add_separator("ARCHAEOLOGY")
-  params:add_option("mode", "Rec Mode", {"Auto", "Manual"}, 1)
-  params:set_action("mode", function(x) is_manual = (x == 2) end)
-
-  params:add_separator("TIMING")
-  params:add_option("sync_mode", "Sync", {"Free", "Beat", "Bar"}, 1)
-  params:add_option("master_toggle", "Master Sync", {"Off", "On"}, 2)
-  params:add_control("silence_time", "Silence Time", controlspec.new(0.5, 10, "lin", 0.1, 2))
-
-  params:add_option("environment", "Environment", Env.list, 3) -- Default to Grove
-  params:set_action("environment", function(x) current_env = Env.list[x] end)
-
-  poll_input = poll.set("amp_in_l")
-  poll_input.callback = function(val)
-    if not is_manual and not is_recording then
-      local triggered, new_timer = Phys.process_silence(val, 0.1, silence_timer, params:get("silence_time"))
-      silence_timer = new_timer
-      if triggered then advance_strata() end
-    end
-  end
-  poll_input:start()
-
-  clock.run(physics_loop)
-  clock.run(audio_update_loop)
+function advance_strata()
+  print("Strata Advanced")
 end
 
 function start_recording()
@@ -61,6 +37,7 @@ function start_recording()
   softcut.position(1, 0)
   softcut.rec(1, 1)
   is_recording = true
+  redraw() -- Update UI to show REC
 end
 
 function stop_recording()
@@ -78,10 +55,8 @@ function stop_recording()
   softcut.loop_end(1, duration)
   softcut.rec(1, 0)
   is_recording = false
-end
-
-function advance_strata()
-  print("Strata Advanced")
+  advance_strata()
+  redraw() -- Update UI to hide REC
 end
 
 function handle_event(idx, e)
@@ -94,23 +69,57 @@ function handle_event(idx, e)
   end
 end
 
+---------------------------------------------------------
+-- CORE NORNS FUNCTIONS                                --
+---------------------------------------------------------
+
+function init()
+  for i = 1, 6 do
+    layers[i] = { voice = i, pressure_mem = 0, active = true }
+    Soft.setup_voice(i, 60)
+  end
+
+  params:add_separator("ARCHAEOLOGY")
+  params:add_option("mode", "Rec Mode", {"Auto", "Manual"}, 1)
+  params:set_action("mode", function(x) is_manual = (x == 2) end)
+
+  params:add_separator("TIMING")
+  params:add_option("sync_mode", "Sync", {"Free", "Beat", "Bar"}, 1)
+  params:add_option("master_toggle", "Master Sync", {"Off", "On"}, 2)
+  params:add_control("silence_time", "Silence Time", controlspec.new(0.5, 10, "lin", 0.1, 2))
+
+  params:add_option("environment", "Environment", Env.list, 3) 
+  params:set_action("environment", function(x) current_env = Env.list[x] end)
+
+  poll_input = poll.set("amp_in_l")
+  poll_input.callback = function(val)
+    if not is_manual then
+      if val > 0.05 and not is_recording then
+        start_recording()
+      elseif is_recording then
+        local triggered, new_timer = Phys.process_silence(val, 0.1, silence_timer, params:get("silence_time"))
+        silence_timer = new_timer
+        if triggered then stop_recording() end
+      end
+    end
+  end
+  poll_input:start()
+
+  clock.run(physics_loop)
+  clock.run(audio_update_loop)
+end
+
 function enc(n, d)
   if n == 1 then params:delta("environment", d)
   elseif n == 2 then weather_intensity = util.clamp(weather_intensity + (d/100), 0, 1)
   elseif n == 3 then excavation_pressure = util.clamp(excavation_pressure + (d/100), 0, 1) end
+  redraw() 
 end
 
 function key(n, z)
   if n == 1 then alt_held = (z == 1) end
   if n == 2 then key_2_down = (z == 1) end
   if n == 3 then key_3_down = (z == 1) end
-
-  if z == 1 and key_2_down and key_3_down then
-    excavation_pressure = 0
-    weather_intensity = 0.25
-    master_duration = -1
-    return
-  end
 
   if z == 1 then
     if alt_held then
@@ -124,6 +133,7 @@ function key(n, z)
       end
     end
   end
+  redraw()
 end
 
 function physics_loop()
@@ -162,12 +172,29 @@ function redraw()
 end
 
 function draw_status_header()
+  -- Environment Name
   screen.level(10)
   screen.move(0, 7)
   screen.text(current_env:upper())
-  screen.move(60, 7)
+  
+  -- Mode Indicator
+  screen.move(128, 7)
+  screen.text_right(is_manual and "MANUAL" or "AUTO")
+
+  -- Recording Indicator
+  if is_recording then
+    screen.level(15)
+    screen.move(128, 17)
+    screen.text_right("● REC")
+  end
+
+  -- BPM/Sync
+  screen.move(64, 7)
   screen.level(4)
-  screen.text(params:get("bpm") .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
+  local tempo = params:get("clock_tempo") or 120
+  screen.text_center(math.floor(tempo) .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
+  
+  -- Weather
   screen.move(110, 62)
   screen.level(5)
   screen.text("W:" .. math.floor(weather_intensity * 100))
