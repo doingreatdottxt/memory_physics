@@ -8,6 +8,7 @@
 local Env = require "memory_physics/lib/environments"
 local Phys = require "memory_physics/lib/physics"
 local Soft = require "memory_physics/lib/engine_core"
+local UI = require "memory_physics/lib/ui_manager"
 
 -- Constants
 MAX_LAYERS = 6
@@ -18,6 +19,7 @@ layers = {}
 active_layers = 1
 excavation_pressure = 0
 current_env = "forest"
+alt_held = false
 
 function init()
     -- Initialize Layers
@@ -31,44 +33,82 @@ function init()
         Soft.setup_voice(i, MAX_LOOP_LENGTH)
     end
     
-    -- Start Physics Clocks
+    -- Setup Parameters (Norns Menu)
+    params:add_separator("MEMORY PHYSICS")
+    params:add_option("environment", "Environment", Env.list, 1)
+    params:set_action("environment", function(x) current_env = Env.list[x] end)
+    
+    -- Start Logic Clocks
     clock.run(physics_loop)
     clock.run(audio_update_loop)
-    
-    redraw()
+    clock.run(ui_loop)
 end
 
--- The "Brain" Loop: Handles the math and logic timing
+---------------------------------------------------------
+-- LOGIC LOOPS
+---------------------------------------------------------
+
 function physics_loop()
     while true do
-        clock.sleep(1/15) -- 15Hz logic update (ideal for Daisy control rate)
-        
+        clock.sleep(1/15) -- 15Hz control rate logic
         for i, l in ipairs(layers) do
-            local depth = Phys.calculate_layer_depth(i, active_layers)
-            local target_p = excavation_pressure * depth
-            
-            -- Smooth the pressure transitions
-            l.pressure_mem = Phys.interpolate(l.pressure_mem, target_p, 0.1)
-            
-            -- Check for random "Archeological" events (dropouts/crackles)
-            local event = Env.get_random_event(current_env, l.pressure_mem)
-            if event then
-                handle_event(i, event)
+            if l.active then
+                local depth = Phys.calculate_layer_depth(i, active_layers)
+                local target_p = excavation_pressure * depth
+                
+                -- Smooth transitions in the physics module
+                l.pressure_mem = Phys.interpolate(l.pressure_mem, target_p, 0.1)
+                
+                -- Check for random biome events
+                local event = Env.get_random_event(current_env, l.pressure_mem)
+                if event then handle_event(i, event) end
             end
         end
     end
 end
 
--- The "Execution" Loop: Sends commands to the audio engine
 function audio_update_loop()
     while true do
-        clock.sleep(1/30) 
+        clock.sleep(1/30) -- 30Hz update to Softcut
         for i, l in ipairs(layers) do
             if l.active then
-                local params = Env.get_params(current_env, l.pressure_mem, i)
-                Soft.apply_params(i, params)
+                local p = Env.get_params(current_env, l.pressure_mem, i)
+                Soft.apply_params(i, p)
             end
         end
+    end
+end
+
+function ui_loop()
+    while true do
+        clock.sleep(1/15)
+        redraw()
+    end
+end
+
+---------------------------------------------------------
+-- HARDWARE INTERACTION
+---------------------------------------------------------
+
+function enc(n, d)
+    if n == 1 then
+        -- Navigation or Environment selector
+        params:delta("environment", d)
+    elseif n == 2 then
+        -- Layer Depth / Density
+        active_layers = util.clamp(active_layers + d, 1, MAX_LAYERS)
+        for i=1, MAX_LAYERS do layers[i].active = (i <= active_layers) end
+    elseif n == 3 then
+        -- Main Excavation Pressure
+        excavation_pressure = util.clamp(excavation_pressure + (d/100), 0, 1)
+    end
+end
+
+function key(n, z)
+    if n == 1 then alt_held = z == 1 end
+    if n == 3 and z == 1 then
+        -- Global Reset or Pulse
+        excavation_pressure = 0
     end
 end
 
@@ -76,19 +116,31 @@ function handle_event(layer_idx, event)
     if event.type == "jump" then
         softcut.position(layer_idx, math.random(0, MAX_LOOP_LENGTH))
     elseif event.type == "dropout" then
-        -- Temporarily dip gain
+        layers[layer_idx].is_dropout = true
         softcut.level(layer_idx, 0)
         clock.run(function() 
             clock.sleep(event.duration) 
             softcut.level(layer_idx, 1.0) 
+            layers[layer_idx].is_dropout = false
         end)
     end
 end
 
--- UI and Interaction logic continues below...
+---------------------------------------------------------
+-- DRAW
+---------------------------------------------------------
+
 function redraw()
     screen.clear()
-    -- Visual representation of the 6 layers and pressure
-    screen.stroke()
+    
+    UI.draw_background(current_env)
+    UI.draw_layers(layers, active_layers, excavation_pressure)
+    UI.draw_pressure_gauge(excavation_pressure)
+    
+    -- Status Overlay
+    screen.level(15)
+    screen.move(0, 10)
+    screen.text(current_env:upper())
+    
     screen.update()
 end
