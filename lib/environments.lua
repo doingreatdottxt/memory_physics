@@ -15,10 +15,7 @@ Environments.data = {
 function Environments.get_params(env_name, pressure, layer_idx, weather)
     local d = Environments.data[env_name] or Environments.data["grove"]
     local p_sq = pressure * pressure
-    
-    -- Weather dampening: 50% reduction per layer depth
     local layer_weather = weather * (0.5 ^ (layer_idx - 1))
-    
     local cutoff = 0
     local gain_mod = 0
     
@@ -55,10 +52,7 @@ function Environments.get_random_event(env_name, pressure, layer_idx, weather)
         return {type = "choppy_wave", rate_mult = 0.5 + math.random()}
     elseif env_name == "mountain" and pressure > 0.8 then
         return {type = "seismic_crack", duration = 0.4}
-    elseif env_name == "sand" and pressure < 0.3 then
-        return {type = "grain_scatter", duration = 0.1}
     end
-    
     return nil
 end
 
