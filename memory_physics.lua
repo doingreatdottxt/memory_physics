@@ -36,6 +36,8 @@ function start_recording()
   rec_start_time = util.time()
   softcut.position(1, 0)
   softcut.rec(1, 1)
+  softcut.rec_level(1, 1.0) -- Ensure recording head is armed
+  softcut.pre_level(1, 0.0) -- Set to overwrite mode
   is_recording = true
   redraw() -- Update UI to show REC
 end
@@ -44,16 +46,24 @@ function stop_recording()
   local duration = util.time() - rec_start_time
   local sync = params:get("sync_mode")
   
-  if sync == 2 then duration = Phys.snap_to_interval(duration, Phys.get_beat_sec())
-  elseif sync == 3 then duration = Phys.snap_to_interval(duration, Phys.get_beat_sec() * 4) end
+  if sync == 2 then 
+    duration = Phys.snap_to_interval(duration, Phys.get_beat_sec())
+  elseif sync == 3 then 
+    duration = Phys.snap_to_interval(duration, Phys.get_beat_sec() * 4) 
+  end
   
   if params:get("master_toggle") == 2 then
-    if master_duration == -1 then master_duration = duration 
-    else duration = Phys.snap_to_interval(duration, master_duration) end
+    if master_duration == -1 then 
+      master_duration = duration 
+    else 
+      duration = Phys.snap_to_interval(duration, master_duration) 
+    end
   end
 
   softcut.loop_end(1, duration)
   softcut.rec(1, 0)
+  softcut.rec_level(1, 0.0) -- Disarm recording head
+  softcut.pre_level(1, 1.0) -- Set to preserve mode for loop
   is_recording = false
   advance_strata()
   redraw() -- Update UI to hide REC
@@ -62,10 +72,42 @@ end
 function handle_event(idx, e)
   if e.type == "bubble_pop" then
     softcut.rate(idx, e.rate_shift)
-    clock.run(function() clock.sleep(0.1) softcut.rate(idx, 1.0) end)
+    clock.run(function() 
+      clock.sleep(0.1) 
+      softcut.rate(idx, 1.0) 
+    end)
   elseif e.type == "seismic_crack" then
     softcut.rec_level(idx, 1.4)
-    clock.run(function() clock.sleep(e.duration) softcut.rec_level(idx, 1.0) end)
+    clock.run(function() 
+      clock.sleep(e.duration) 
+      softcut.rec_level(idx, 1.0) 
+    end)
+  end
+end
+
+---------------------------------------------------------
+-- LOOPS
+---------------------------------------------------------
+
+function physics_loop()
+  while true do
+    clock.sleep(1/15)
+    for i, l in ipairs(layers) do
+      local depth = Phys.calculate_layer_depth(i, active_layers)
+      l.pressure_mem = Phys.interpolate(l.pressure_mem, excavation_pressure * depth, 0.1)
+      local event = Env.get_random_event(current_env, l.pressure_mem, i, weather_intensity)
+      if event then handle_event(i, event) end
+    end
+  end
+end
+
+function audio_update_loop()
+  while true do
+    clock.sleep(1/30)
+    for i, l in ipairs(layers) do
+      local p = Env.get_params(current_env, l.pressure_mem, i, weather_intensity)
+      Soft.apply_params(i, p)
+    end
   end
 end
 
@@ -74,6 +116,9 @@ end
 ---------------------------------------------------------
 
 function init()
+  softcut.buffer_clear()
+  layers = {}
+  
   for i = 1, 6 do
     layers[i] = { voice = i, pressure_mem = 0, active = true }
     Soft.setup_voice(i, 60)
@@ -136,28 +181,6 @@ function key(n, z)
   redraw()
 end
 
-function physics_loop()
-  while true do
-    clock.sleep(1/15)
-    for i, l in ipairs(layers) do
-      local depth = Phys.calculate_layer_depth(i, active_layers)
-      l.pressure_mem = Phys.interpolate(l.pressure_mem, excavation_pressure * depth, 0.1)
-      local event = Env.get_random_event(current_env, l.pressure_mem, i, weather_intensity)
-      if event then handle_event(i, event) end
-    end
-  end
-end
-
-function audio_update_loop()
-  while true do
-    clock.sleep(1/30)
-    for i, l in ipairs(layers) do
-      local p = Env.get_params(current_env, l.pressure_mem, i, weather_intensity)
-      Soft.apply_params(i, p)
-    end
-  end
-end
-
 function redraw()
   screen.clear()
   if layers and #layers > 0 then
@@ -172,30 +195,21 @@ function redraw()
 end
 
 function draw_status_header()
-  -- Environment Name
   screen.level(10)
   screen.move(0, 7)
   screen.text(current_env:upper())
   
-  -- Mode Indicator
   screen.move(128, 7)
   screen.text_right(is_manual and "MANUAL" or "AUTO")
 
-  -- Recording Indicator
   if is_recording then
     screen.level(15)
     screen.move(128, 17)
     screen.text_right("● REC")
   end
 
-  -- BPM/Sync
   screen.move(64, 7)
   screen.level(4)
   local tempo = params:get("clock_tempo") or 120
   screen.text_center(math.floor(tempo) .. " [" .. ({"FREE", "BEAT", "BAR"})[params:get("sync_mode")] .. "]")
-  
-  -- Weather
-  screen.move(110, 62)
-  screen.level(5)
-  screen.text("W:" .. math.floor(weather_intensity * 100))
 end
