@@ -13,10 +13,10 @@ local physics = {
 function init()
   screen.clear()
   screen.move(64, 32)
-  screen.text_center("PRESSURIZING...")
+  screen.text_center("PRESSURIZING CRUST...")
   screen.update()
 
-  -- Wait for the 23MB buffer allocation to finish
+  -- Allow the engine time to allocate memory before pinging
   clock.run(function()
     clock.sleep(1.0)
     engine.ready()
@@ -29,8 +29,8 @@ end
 
 function form_new_layer()
   if not physics.recording then
-    engine.shift_layers() -- Bury existing audio
-    engine.record_start() -- Form new surface
+    engine.shift_layers() -- "Burial"
+    engine.record_start() -- "Formation"
     physics.recording = true
     if physics.layers_active < physics.max_layers then
       physics.layers_active = physics.layers_active + 1
@@ -41,7 +41,7 @@ function form_new_layer()
 end
 
 function key(n, z)
-  if n == 2 and z == 1 then -- Key 2 to Form/Bury
+  if n == 2 and z == 1 then 
     form_new_layer()
   end
 end
@@ -49,17 +49,16 @@ end
 function redraw()
   screen.clear()
   
-  -- Header
+  -- Display the status of the crust
   screen.level(physics.recording and 15 or 3)
   screen.move(0, 10)
   screen.text(physics.recording and "FORMING STRATA..." or "CRUST STABLE")
   
-  -- Visualize the layers
+  -- Visualization of the 6-layer stack
   for i=1, 6 do
     local is_active = i <= physics.layers_active
     screen.level(is_active and math.floor(15/i) or 1)
     
-    -- Draw layer blocks
     local y = 62 - (i * 8)
     screen.rect(10, y, 108, 6)
     if is_active then screen.fill() else screen.stroke() end
