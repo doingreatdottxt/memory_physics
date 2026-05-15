@@ -36,7 +36,7 @@ Control scheme -
   Key 3 - Toggle Automatic recording mode on/off (on by default)
   Shift + key 2 - Cycle Environment
   Shift + key 3 - Excavate (resets all active layers)
-  Encoder 1 - Physics level
+  Encoder 1 - global volume
   Encoder 2 - Weather intensity (20% at boot)
   Encoder 3 - Pressure intensity override
 
