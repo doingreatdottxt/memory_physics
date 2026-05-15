@@ -1,26 +1,22 @@
 local UIManager = {}
 
 function UIManager.draw_layers(layers, active_count, global_pressure)
-  -- Draw the 6 horizontal strata lines
   for i = 1, 6 do
     local y = 15 + (i * 7)
-    if layers and layers[i] then
+    if layers[i] and layers[i].duration ~= -1 then
       local p = layers[i].pressure_mem or 0
-      local gain = layers[i].gain_mem or 0
+      local gain_mem = layers[i].gain_mem or 1.0
+      local vol = layers[i].current_vol or 0.0
       
-      -- Brightness = (Pressure Level) * (Life/Gain Level)
-      local base_level = math.floor(p * 10) + 2
-      screen.level(math.floor(base_level * gain))
+      -- Brightness reflects actual audible presence
+      local base_brightness = math.floor(p * 5) + 5
+      local final_alpha = vol * gain_mem
       
-      screen.move(10, y)
-      screen.line(110, y)
-      screen.stroke()
-      
-      -- Draw artifacts that also dim with the layer
-      if gain > 0.1 then
-        screen.level(math.floor(15 * gain))
-        screen.pixel(12 + (math.sin(util.time() + i) * 2), y)
-        screen.fill()
+      if final_alpha > 0.05 then
+        screen.level(math.floor(base_brightness * final_alpha))
+        screen.move(10, y)
+        screen.line(110, y)
+        screen.stroke()
       end
     end
   end
@@ -38,8 +34,7 @@ end
 
 function UIManager.draw_help(is_manual)
   screen.level(15)
-  screen.move(0, 10)
-  screen.text("ARCHAEOLOGY HELP")
+  screen.move(0, 10); screen.text("ARCHAEOLOGY HELP")
   screen.level(4)
   screen.move(0, 25); screen.text("K3: Toggle Auto/Manual")
   screen.move(0, 35); screen.text("K1+K3: Cycle Sync Mode")
