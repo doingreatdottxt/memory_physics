@@ -27,6 +27,8 @@ Compressor
 
 Noise Gate
 
+Echo
+
 
 Control scheme - 
   Key 1 - Shift
@@ -39,5 +41,9 @@ Control scheme -
   Encoder 3 - Pressure intensity override
 
 
-Echo
+
+Visual Feedback
+  Header - "STABLE" or "FORMING STRATA" and recording timer
+  Center - Strata Stack : Six stacked horizontal pictograms representing the buffers as soil layers. top layer should have visual cues to the environment. deeper layer should become increasingly rocky. Playhead: A vertical line scrolls across the Surface Layer (top bar) to show the current loop position.
+  Footer - Weather level / pressure level
 
