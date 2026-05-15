@@ -85,11 +85,12 @@ Engine_MemoryPhysics : CroneEngine {
 
         context.server.sync;
 
-        // Uses explicit index mappings to prevent destructive multichannel expansion overwrites
+        // Fixed: pointing directly to the stereo bus index wrapper without an array offset
         synths = Array.fill(maxLayers, { arg i;
-            Synth(\StrataLayer, [\buf, buffers[i], \out, context.out_b[0].index, \depth, i, \dur_idx, i, \phase_out, phaseBus.index + i], context.xg);
+            Synth(\StrataLayer, [\buf, buffers[i], \out, context.out_b.index, \depth, i, \dur_idx, i, \phase_out, phaseBus.index + i], context.xg);
         });
 
+        // context.in_b is an array of mono buses, so index tracking here remains intact
         Synth(\InputTracker, [\in, context.in_b[0].index], context.xg);
 
         this.addCommand(\shift_layers, "", {
