@@ -1,6 +1,5 @@
 -- memory_physics
 -- Geological Strata Looper
--- LIFO Buffer Management
 
 engine.name = 'MemoryPhysics'
 
@@ -11,19 +10,25 @@ local physics_state = {
 }
 
 function init()
-  -- Reset all buffers on engine boot
-  screen_dirty = true
-  
-  -- Metro for UI
+  -- Clear screen and show status
+  screen.clear()
+  screen.move(64, 32)
+  screen.text_center("STABILIZING CRUST...")
+  screen.update()
+
+  -- Give the engine a moment to allocate 23MB of buffers
+  clock.run(function()
+    clock.sleep(1.0)
+    engine.ready()
+    print("Memory Physics: System Stable")
+  end)
+
   redraw_timer = metro.init(function() redraw() end, 1/15)
   redraw_timer:start()
-  
-  print("Memory Physics: Crust Initialized")
 end
 
 function form_strata()
   if not physics_state.is_recording then
-    -- Move old layers deeper before recording new surface
     engine.shift_layers()
     engine.record_start()
     physics_state.is_recording = true
@@ -31,29 +36,37 @@ function form_strata()
       physics_state.active_layers = physics_state.active_layers + 1
     end
   else
-    -- Stop recording/Forming
     physics_state.is_recording = false
   end
 end
 
 function key(n, z)
-  if n == 2 and z == 1 then -- Key 2: Form/Bury
+  if n == 2 and z == 1 then
     form_strata()
   end
 end
 
 function redraw()
   screen.clear()
-  screen.level(15)
-  screen.move(0, 10)
-  screen.text("PHYSICS: " .. (physics_state.is_recording and "FORMING" or "STABLE"))
   
-  -- Visualize the 6 layers
+  -- Record Header
+  screen.level(physics_state.is_recording and 15 or 3)
+  screen.move(128, 10)
+  screen.text_right(physics_state.is_recording and "FORMING" or "STABLE")
+  
+  -- Visualizing the 6 Strata
   for i=1, 6 do
-    local depth_level = i <= physics_state.active_layers and 15 or 1
-    screen.level(math.floor(depth_level / i))
-    screen.rect(10, 60 - (i * 7), 100, 4)
-    screen.fill()
+    if i <= physics_state.active_layers then
+      screen.level(math.floor(15 / i))
+      -- Draw layers from bottom (oldest) up
+      screen.rect(10, 60 - (i * 7), 108, 5)
+      screen.fill()
+    else
+      screen.level(1)
+      screen.rect(10, 60 - (i * 7), 108, 1)
+      screen.stroke()
+    end
   end
+  
   screen.update()
 end
