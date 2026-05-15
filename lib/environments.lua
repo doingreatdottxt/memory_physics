@@ -15,29 +15,22 @@ Environments.data = {
 function Environments.get_params(env_name, pressure, layer_idx, weather)
   local d = Environments.data[env_name] or Environments.data["Grove"]
   local p_sq = pressure * pressure
-  local layer_weather = weather * (0.5 ^ (layer_idx - 1))
   
-  local cutoff = d.base_fc - (p_sq * d.mod_fc)
+  -- Weather Seepage Logic
+  local layer_weather = 0
+  if layer_idx == 1 then
+    layer_weather = weather
+  elseif layer_idx == 2 and weather >= 0.8 then
+    layer_weather = weather * 0.25 -- Minimal bleed through the surface
+  end
   
   return {
-    cutoff = math.max(20, math.min(20000, cutoff)),
+    cutoff = math.max(20, math.min(20000, d.base_fc - (p_sq * d.mod_fc))),
     rq = d.base_rq + (p_sq * d.mod_rq),
     gain = 0.9 - (pressure * 0.4),
     rate = 1.0 + (math.sin(util.time() * (d.drift * 25)) * (layer_weather * d.drift)),
-    pan_width = 1.0 - (pressure * 0.8)
+    pan_width = 1.0 - (pressure * 0.5) 
   }
-end
-
-function Environments.get_random_event(env_name, pressure, layer_idx, weather)
-  local layer_weather = weather * (0.5 ^ (layer_idx - 1))
-  if math.random() > (layer_weather * 0.2) then return nil end
-
-  if env_name == "Swamp" then
-    return {type = "bubble_pop", rate_shift = 0.8 + (math.random() * 0.4)}
-  elseif env_name == "Mountain" and pressure > 0.8 then
-    return {type = "seismic_crack", duration = 0.4}
-  end
-  return nil
 end
 
 return Environments
