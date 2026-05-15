@@ -1,72 +1,44 @@
 -- memory_physics
--- @doingreatdottxt
--- l.1: surface (audible/weather)
--- l.6: deep crust (crushed/muffled)
+-- Geological Strata Looper
+-- LIFO Buffer Management
 
 engine.name = 'MemoryPhysics'
 
-local strata = {}
-local max_strata = 6
-local loop_sec = 20
+local physics_state = {
+  is_recording = false,
+  active_layers = 0,
+  max_layers = 6
+}
 
 function init()
-  -- Pre-allocate state for 6 layers
-  for i=1,max_strata do
-    strata[i] = {
-      active = false,
-      depth = i,
-      pressure = 0,
-      erosion = 1.0
-    }
-  end
-  
-  -- Inform engine of our constraints
-  engine.setup(max_strata, loop_sec)
-  
-  -- UI Refresh
+  -- Reset all buffers on engine boot
   screen_dirty = true
-  redraw_metro = metro.init(function(stage) redraw() end, 1/15)
-  redraw_metro:start()
-end
-
--- The "Form Strata" function (Record New)
-function form_new_layer()
-  -- 1. Shift all existing layers down (LIFO)
-  -- This mimics geological burial
-  engine.shift_layers()
   
-  -- 2. Update Lua state
-  for i=max_strata, 2, -1 do
-    strata[i].active = strata[i-1].active
-  end
+  -- Metro for UI
+  redraw_timer = metro.init(function() redraw() end, 1/15)
+  redraw_timer:start()
   
-  -- 3. Start recording into the "Surface" (Buffer 0 in SC)
-  strata[1].active = true
-  engine.record_surface(1) -- 1 for start
+  print("Memory Physics: Crust Initialized")
 end
 
--- Archeological Excavation (Remove Top Layer)
-function excavate()
-  engine.pop_layer()
-  for i=1, max_strata-1 do
-    strata[i].active = strata[i+1].active
-  end
-  strata[max_strata].active = false
-end
-
-function enc(n, d)
-  if n == 2 then
-    -- Weather/Erosion control
-  elseif n == 3 then
-    -- Pressure/Depth control
+function form_strata()
+  if not physics_state.is_recording then
+    -- Move old layers deeper before recording new surface
+    engine.shift_layers()
+    engine.record_start()
+    physics_state.is_recording = true
+    if physics_state.active_layers < 6 then
+      physics_state.active_layers = physics_state.active_layers + 1
+    end
+  else
+    -- Stop recording/Forming
+    physics_state.is_recording = false
   end
 end
 
 function key(n, z)
-  if n == 2 and z == 1 then
-    form_new_layer()
-  elseif n == 3 and z == 1 then
-    excavate()
+  if n == 2 and z == 1 then -- Key 2: Form/Bury
+    form_strata()
   end
 end
 
@@ -74,14 +46,14 @@ function redraw()
   screen.clear()
   screen.level(15)
   screen.move(0, 10)
-  screen.text("STRATA STACK")
+  screen.text("PHYSICS: " .. (physics_state.is_recording and "FORMING" or "STABLE"))
   
-  for i=1, max_strata do
-    if strata[i].active then
-      screen.level(math.floor(15/i)) -- Deeper layers are dimmer
-      screen.rect(10, 15 + (i*7), 100, 5)
-      screen.fill()
-    end
+  -- Visualize the 6 layers
+  for i=1, 6 do
+    local depth_level = i <= physics_state.active_layers and 15 or 1
+    screen.level(math.floor(depth_level / i))
+    screen.rect(10, 60 - (i * 7), 100, 4)
+    screen.fill()
   end
   screen.update()
 end
