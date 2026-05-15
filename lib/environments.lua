@@ -1,5 +1,4 @@
 local Environments = {}
-
 Environments.list = {"Sand", "Mountain", "Grove", "River Bank", "Sea", "Swamp", "Cave"}
 
 Environments.data = {
@@ -15,14 +14,9 @@ Environments.data = {
 function Environments.get_params(env_name, pressure, layer_idx, weather)
   local d = Environments.data[env_name] or Environments.data["Grove"]
   local p_sq = pressure * pressure
-  
-  -- Weather Seepage Logic
   local layer_weather = 0
-  if layer_idx == 1 then
-    layer_weather = weather
-  elseif layer_idx == 2 and weather >= 0.8 then
-    layer_weather = weather * 0.25 -- Minimal bleed through the surface
-  end
+  if layer_idx == 1 then layer_weather = weather
+  elseif layer_idx == 2 and weather >= 0.8 then layer_weather = weather * 0.25 end
   
   return {
     cutoff = math.max(20, math.min(20000, d.base_fc - (p_sq * d.mod_fc))),
