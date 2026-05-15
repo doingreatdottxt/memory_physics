@@ -1,59 +1,62 @@
-Engine_MemoryPhysics : EngineObject {
+Engine_MemoryPhysics : CroneEngine {
     var <buffers;
-    var <playGroup;
     var <maxLayers = 6;
+    var <synthGroup;
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
     }
 
     alloc {
+        synthGroup = Group.tail(context.xg);
+        
+        // Pre-allocate 6 stereo buffers (20s each)
+        // This is the exact memory footprint we will use on the Daisy Seed
         buffers = Array.fill(maxLayers, {
             Buffer.alloc(context.server, context.server.sampleRate * 20, 2);
         });
 
-        playGroup = Group.tail(context.xg);
-
-        // Define the Strata Synth
         SynthDef(\StrataLayer, {
-            arg buf, out, amp=1.0, depth=0, gate=1;
-            var sig, pressure, crush, muffled;
+            arg buf, out, amp=0, depth=0, gate=1;
+            var sig, pressure, noise, env;
+            
+            // Pressure 0.0 (Surface) to 1.0 (Deep Crust)
+            pressure = (depth / (maxLayers - 1)).clip(0, 1);
             
             sig = PlayBuf.ar(2, buf, loop: 1);
             
-            // PRESSURE MECHANIC
-            // As depth increases (0 to 5), filter closes and bitcrush increases
-            pressure = depth / 5.0; 
+            // GEOLOGICAL DSP (Daisy-friendly)
+            // 1. Muffling: LPF frequency drops as depth increases
+            sig = LPF.ar(sig, Math.exp(Line.kr(log(20000), log(200), pressure)));
             
-            // Muffling (Low Pass)
-            muffled = LPF.ar(sig, 20000 - (pressure * 19500));
+            // 2. Compaction: Simple soft-clipping to simulate pressure
+            sig = (sig * (1 + (pressure * 4))).softclip;
             
-            // Crushing (Bitcrush/Sample Rate reduction)
-            crush = Decimator.ar(muffled, 48000 - (pressure * 40000), 16 - (pressure * 12));
+            // 3. Artifacts: Low-level brown noise leakage at depth
+            noise = BrownNoise.ar(pressure * 0.05);
             
-            sig = SelectX.ar(pressure.lag(0.5), [sig, crush]);
-            
-            Out.ar(out, sig * amp * EnvGen.kr(Env.asr(0.1, 1, 0.1), gate, doneAction: 2));
+            env = EnvGen.kr(Env.asr(0.1, 1, 0.1), gate, doneAction: 2);
+            Out.ar(out, (sig + noise) * amp * env);
         }).add;
 
         context.server.sync;
 
-        // Command to shift buffers down
+        // LIFO Shift Logic (The "Burial" process)
         this.addCommand(\shift_layers, "", {
-            // Move buffer 4 to 5, 3 to 4, etc.
-            // This is "Burial"
             (maxLayers-1).reverseDo({ arg i;
-                buffers[i+1].copyData(buffers[i]);
+                buffers[i].copyData(buffers[i-1]);
             });
-            buffers[0].zero; // Clear surface for new recording
+            buffers[0].zero; // Clear surface for new "formation"
         });
 
-        this.addCommand(\record_surface, "i", { arg msg;
-            // Implementation for recording into buffers[0]
+        this.addCommand(\record_start, "", {
+            // Buffer 0 is always the recording target (The Surface)
+            RecordBuf.ar(In.ar(context.in_b, 2), buffers[0], loop: 0);
         });
     }
 
     free {
         buffers.do(_.free);
+        synthGroup.free;
     }
 }
