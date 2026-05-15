@@ -13,63 +13,59 @@ Engine_MemoryPhysics : CroneEngine {
         pressureBus = Bus.control(context.server, 1).set(0.0);
         envBus = Bus.control(context.server, 1).set(0);
         volBus = Bus.control(context.server, 1).set(1.0);
-        durBus = Bus.control(context.server, maxLayers).set(20.0); // Individual durations
+        durBus = Bus.control(context.server, maxLayers).set(5.0); // Start with 5s non-zero duration
 
         SynthDef(\StrataLayer, {
             arg buf, out, depth=0, phase_out, dur_idx;
-            var sig, pressure, base_p, lpf, phase, noise, w_val, env, v, duration;
+            var sig, pressure, lpf, phase, noise, w_val, env, v, duration;
             
             w_val = In.kr(weatherBus.index, 1);
-            pressure = (In.kr(pressureBus.index, 1) + (depth/(maxLayers-1))).clip(0, 1);
-            env = In.kr(envBus.index, 1);
             v = In.kr(volBus.index, 1);
+            env = In.kr(envBus.index, 1);
             duration = In.kr(durBus.index + dur_idx, 1);
+            pressure = (In.kr(pressureBus.index, 1) + (depth/(maxLayers-1))).clip(0, 1);
 
-            // Playback logic
+            // Audio Playback
             phase = Phasor.ar(0, BufRateScale.kr(buf), 0, duration * BufSampleRate.kr(buf));
-            sig = BufRd.ar(2, buf, phase);
+            sig = BufRd.ar(2, buf, phase, loop: 1); // Ensure loop is explicitly 1
             Out.kr(phase_out, phase / (duration * BufSampleRate.kr(buf)));
 
-            // Weather (Added even if buffer is empty)
+            // Weather Noise (Summed to Sig)
             noise = Select.ar(env, [
-                BrownNoise.ar(0.5) * LFDNoise3.kr(0.3).range(0.2, 1), 
-                Dust.ar(12) * 0.7, 
-                PinkNoise.ar(0.4) * SinOsc.kr(0.05).range(0.3, 1)
-            ]) * w_val * (1-(depth/(maxLayers-1))) * 0.4;
+                BrownNoise.ar(0.1), 
+                Dust.ar(10) * 0.5, 
+                PinkNoise.ar(0.1)
+            ]) * w_val;
 
-            // Geological Filtering
-            lpf = pressure.linexp(0, 1, 20000, 150).lag(0.5);
-            sig = LPF.ar(sig + noise, lpf);
+            // Filtering & Final Gain
+            lpf = pressure.linexp(0, 1, 20000, 100);
+            sig = LPF.ar(sig + noise, lpf.lag(0.2));
             
-            // Compaction Squelch
-            sig = (sig * (1 + (pressure * 2))).softclip;
-            
-            Out.ar(out, sig * v * (1 - (depth * 0.1)));
+            // Map specifically to context.out_b
+            Out.ar(out, sig * v);
         }).add;
 
-        SynthDef(\InputTracker, { arg in; SendReply.kr(Impulse.kr(20), '/in_amp', Amplitude.kr(Mix(In.ar(in, 2)))); }).add;
-        SynthDef(\SurfaceRecorder, { arg buf, in; RecordBuf.ar(In.ar(in, 2), buf, loop: 0, doneAction: 2); }).add;
+        // Input monitoring for Auto-Record
+        SynthDef(\InputTracker, { arg in; 
+            SendReply.kr(Impulse.kr(10), '/in_amp', [Amplitude.kr(Mix(In.ar(in, 2)))], 999); 
+        }).add;
+
+        SynthDef(\SurfaceRecorder, { arg buf, in; 
+            RecordBuf.ar(In.ar(in, 2), buf, recLevel: 1.0, preLevel: 0.0, loop: 0, doneAction: 2); 
+        }).add;
 
         context.server.sync;
 
         synths = Array.fill(maxLayers, { arg i; 
-            Synth(\StrataLayer, [
-                \buf, buffers[i], 
-                \out, context.out_b, 
-                \depth, i, 
-                \dur_idx, i,
-                \phase_out, phaseBus.index + i
-            ], context.xg); 
+            Synth(\StrataLayer, [\buf, buffers[i], \out, context.out_b, \depth, i, \dur_idx, i, \phase_out, phaseBus.index + i], context.xg); 
         });
+        
         Synth(\InputTracker, [\in, context.in_b], context.xg);
 
         this.addCommand(\shift_layers, "", { 
-            (maxLayers-1).reverseDo({ arg i; 
-                if(i>0){ buffers[i].copyData(buffers[i-1]); } 
-            }); 
+            (maxLayers-1).reverseDo({ arg i; if(i>0){ buffers[i].copyData(buffers[i-1]); } }); 
             buffers[0].zero; 
         });
-        
         this.addCommand(\set_duration, "if", { arg msg; durBus.setAt(msg[1], msg[2]); });
         this.addCommand(\record_start, "", { recSynth = Synth(\SurfaceRecorder, [\buf, buffers[0], \in, context.in_b], context.xg); });
         this.addCommand(\record_stop, "", { recSynth.free; });
