@@ -19,19 +19,16 @@ function Physics.process_silence(amp, threshold, timer, max_time)
 end
 
 function Physics.get_beat_sec()
-  local bpm = params:get("clock_tempo") or 120
-  return 60 / bpm
+  return 60 / (params:get("clock_tempo") or 120)
 end
 
 function Physics.snap_to_interval(duration, interval)
   return math.max(interval, math.floor((duration / interval) + 0.5) * interval)
 end
 
--- BAR MODE: Snaps to bedrock fractions (0.25x, 0.5x) or multiples (1x, 2x, 3x)
 function Physics.snap_to_bedrock(duration, bedrock)
   if bedrock <= 0 then return duration end
   local ratio = duration / bedrock
-  
   if ratio >= 1 then
     return math.floor(ratio + 0.5) * bedrock
   else
