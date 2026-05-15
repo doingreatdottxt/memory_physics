@@ -1,6 +1,7 @@
 -- memory_physics.lua
 engine.name = 'MemoryPhysics'
 
+local envs = include("lib/environments")
 local physics = {
   recording = false, start_time = 0, duration = 5,
   layers_active = 0, max_layers = 6, shift_held = false,
@@ -13,7 +14,7 @@ function init()
   -- Re-register OSC with explicit path check
   osc.event = function(path, args, from)
     if path == "/in_amp" and params:get("auto_record") == 2 then
-      local amp = args[3] -- SendReply data usually starts at index 3 on Norns
+      local amp = args[3] -- SendReply data starts at index 3 on Norns
       if not physics.recording and amp > params:get("threshold") then
         toggle_formation()
       elseif physics.recording and amp < (params:get("threshold") * 0.5) then
@@ -37,8 +38,18 @@ function setup_params()
   params:add_option("auto_record", "AUTO RECORD", {"OFF", "ON"}, 2)
   params:add_control("threshold", "THRES: TRIGGER", controlspec.new(0.001, 1.0, 'exp', 0.001, 0.05))
   params:add_control("release_time", "THRES: RELEASE (S)", controlspec.new(0.1, 5.0, 'lin', 0.1, 1.0))
-  params:add_option("environment", "ENVIRONMENT", {"WIND", "SAND", "TIDE"}, 1)
-  params:set_action("environment", function(x) engine.set_env(x-1) end)
+  
+  -- Reintegrated Environment Option using environments.lua specifications
+  params:add_option("environment", "ENVIRONMENT", envs.list, 3) -- Defaults to "Grove"
+  params:set_action("environment", function(x)
+    local env_name = envs.list[x]
+    local d = envs.data[env_name]
+    engine.set_env(x - 1)
+    if d then
+      engine.set_environment_params(d.base_fc, d.mod_fc, d.base_rq, d.mod_rq, d.drift)
+    end
+  end)
+  
   params:add_control("weather", "WEATHER INTENSITY", controlspec.new(0, 1, 'lin', 0.01, 0.5))
   params:set_action("weather", function(x) engine.set_weather(x) end)
   params:add_control("pressure", "PRESSURE OVERRIDE", controlspec.new(0, 1, 'lin', 0.01, 0))
@@ -79,7 +90,7 @@ function enc(n, d)
   elseif n == 3 then params:delta("pressure", d) end
 end
 
--- VISUALS (Consolidated)
+-- VISUALS
 function redraw()
   screen.clear()
   screen.level(physics.recording and 15 or 3)
