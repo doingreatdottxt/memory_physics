@@ -1,33 +1,44 @@
 local Physics = {}
 
-function Physics.get_beat_sec()
-  local tempo = params:get("clock_tempo") or 120
-  return 60 / tempo
+function Physics.calculate_layer_depth(idx, active_count)
+  return (idx - 1) / (active_count - 1)
 end
 
-function Physics.snap_to_interval(duration, interval)
-  if interval <= 0 then return duration end
-  return math.max(interval, math.floor((duration / interval) + 0.5) * interval)
+function Physics.interpolate(current, target, rate)
+  return current + (target - current) * rate
 end
 
-function Physics.calculate_layer_depth(i, total_active)
-  if total_active <= 1 then return 0 end
-  return (i - 1) / (total_active - 1)
-end
-
-function Physics.process_silence(input_level, dt, timer, limit)
-  if input_level < 0.02 then
-    timer = timer + dt
+function Physics.process_silence(amp, threshold, timer, max_time)
+  if amp < threshold then
+    timer = timer + (1/15)
+    if timer >= max_time then return true, 0 end
   else
     timer = 0
   end
-  local trigger = (timer > limit)
-  if trigger then timer = 0 end
-  return trigger, timer
+  return false, timer
 end
 
-function Physics.interpolate(current, target, amt)
-  return current + (target - current) * amt
+function Physics.get_beat_sec()
+  local bpm = params:get("clock_tempo") or 120
+  return 60 / bpm
+end
+
+function Physics.snap_to_interval(duration, interval)
+  return math.max(interval, math.floor((duration / interval) + 0.5) * interval)
+end
+
+-- BAR MODE: Snaps to bedrock fractions (0.25x, 0.5x) or multiples (1x, 2x, 3x)
+function Physics.snap_to_bedrock(duration, bedrock)
+  if bedrock <= 0 then return duration end
+  local ratio = duration / bedrock
+  
+  if ratio >= 1 then
+    return math.floor(ratio + 0.5) * bedrock
+  else
+    if ratio < 0.375 then return bedrock * 0.25
+    elseif ratio < 0.75 then return bedrock * 0.5
+    else return bedrock end
+  end
 end
 
 return Physics
