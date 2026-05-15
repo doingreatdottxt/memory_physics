@@ -1,93 +1,69 @@
--- memory_physics.lua
--- Geological Strata Looper
--- README: Audio as geological record.
+// lib/Engine_MemoryPhysics.sc
+// Geological Strata Engine - Memory Physics
+// Portability: Optimized for Daisy Seed (DaisySP) logic
 
-engine.name = 'MemoryPhysics'
+Engine_MemoryPhysics : CroneEngine {
+    var <buffers;
+    var <maxLayers = 6;
 
-local physics = {
-  recording = false,
-  layers_active = 0,
-  max_layers = 6,
-  level = 1.0
+    *new { arg context, doneCallback;
+        ^super.new(context, doneCallback);
+    }
+
+    alloc {
+        // Pre-allocate 6 stereo buffers (20s each)
+        // Memory usage: ~23MB. Daisy Seed safe.
+        buffers = Array.fill(maxLayers, {
+            Buffer.alloc(context.server, context.server.sampleRate * 20, 2);
+        });
+
+        SynthDef(\StrataLayer, {
+            arg buf, out, amp=0, depth=0, gate=1;
+            var sig, pressure, lpfFreq, env;
+            
+            // Pressure 0.0 (Surface) to 1.0 (Deep Crust)
+            pressure = (depth / (maxLayers - 1)).clip(0, 1);
+            
+            sig = PlayBuf.ar(2, buf, loop: 1);
+            
+            // --- GEOLOGICAL DSP ---
+            
+            // 1. Muffling: Linear-to-Exponential mapping
+            // Surface (0) = 20kHz, Deep Crust (1) = 200Hz
+            lpfFreq = pressure.linexp(0, 1, 20000, 200);
+            sig = LPF.ar(sig, lpfFreq.lag(0.2));
+            
+            // 2. Compaction: Increasing gain into a softclip
+            sig = (sig * (1 + (pressure * 2.5))).softclip;
+            
+            // 3. Erosion/Decay: Amp naturally lowers with depth
+            // This falls in line with the "buried sound" idea
+            env = EnvGen.kr(Env.asr(0.1, 1, 0.1), gate, doneAction: 2);
+            
+            Out.ar(out, sig * (amp * (1 - (pressure * 0.5))) * env);
+        }).add;
+
+        context.server.sync;
+
+        // --- COMMANDS ---
+
+        this.addCommand(\shift_layers, "", {
+            (maxLayers-1).reverseDo({ arg i;
+                if (i > 0) {
+                    buffers[i].copyData(buffers[i-1]);
+                };
+            });
+            buffers[0].zero; 
+        });
+
+        this.addCommand(\record_start, "", {
+            { RecordBuf.ar(In.ar(context.in_b, 2), buffers[0], loop: 0, doneAction: 2) }.play;
+        });
+
+        this.addCommand(\ready, "", { "Engine Stable".postln; });
+    }
+
+    free {
+        buffers.do(_.free);
+    }
 }
-
-function init()
-  screen.clear()
-  screen.move(64, 32)
-  screen.text_center("SURVEYING SITE...")
-  screen.update()
-
-  clock.run(function()
-    clock.sleep(1.0)
-    engine.ready()
-    print("Memory Physics: Site Surveyed")
-  end)
-
-  redraw_metro = metro.init(function() redraw() end, 1/15)
-  redraw_metro:start()
-end
-
-function form_new_layer()
-  if not physics.recording then
-    engine.shift_layers() 
-    engine.record_start()
-    physics.recording = true
-    if physics.layers_active < physics.max_layers then
-      physics.layers_active = physics.layers_active + 1
-    end
-  else
-    physics.recording = false
-  end
-end
-
-function enc(n, d)
-  if n == 1 then
-    physics.level = util.clamp(physics.level + d/100, 0, 1)
-  end
-end
-
-function key(n, z)
-  if n == 2 and z == 1 then 
-    form_new_layer()
-  elseif n == 3 and z == 1 then
-    -- Archaeological Excavation (Clear all)
-    physics.layers_active = 0
-    print("Site Cleared")
-  end
-end
-
-function redraw()
-  screen.clear()
-  
-  -- The Sky (Status)
-  screen.level(physics.recording and 15 or 2)
-  screen.move(128, 10)
-  screen.text_right(physics.recording and "FORMING STRATA" or "SITE STABLE")
-  
-  -- The Ground (Strata)
-  for i=1, 6 do
-    local is_active = i <= physics.layers_active
-    local depth_visual = math.floor(15 / i)
-    
-    screen.level(is_active and depth_visual or 1)
-    
-    -- Draw the Earth
-    local y = 62 - (i * 8)
-    if is_active then
-      screen.rect(10, y, 108, 6)
-      screen.fill()
-      -- Highlight the surface layer
-      if i == 1 then
-        screen.level(15)
-        screen.move(12, y + 5)
-        screen.text("SURFACE")
-      end
-    else
-      screen.move(10, y + 3)
-      screen.line(118, y + 3)
-      screen.stroke()
-    end
-  end
-  
-  screen.update()
-end
