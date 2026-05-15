@@ -18,9 +18,7 @@ local alt_held = false
 local show_help = false
 local is_manual = false
 local is_recording = false
-local master_duration = -1
-local key_2_down = false
-local key_3_down = false
+local master_duration = -1 -- Length of the bedrock loop
 local silence_timer = 0
 local rec_start_time = 0
 
@@ -29,17 +27,23 @@ local rec_start_time = 0
 ---------------------------------------------------------
 
 function advance_strata()
-  print("Strata Advanced")
+  -- Shift logic: move 1->2, 2->3, etc.
+  -- This creates the "digging" effect where new recordings bury old ones
+  for i = 6, 2, -1 do
+    layers[i].gain_mem = layers[i-1].gain_mem
+    layers[i].pressure_mem = layers[i-1].pressure_mem
+  end
+  layers[1].gain_mem = 1.0 -- Reset the top layer
 end
 
 function start_recording()
   rec_start_time = util.time()
   softcut.position(1, 0)
   softcut.rec(1, 1)
-  softcut.rec_level(1, 1.0) -- Ensure recording head is armed
-  softcut.pre_level(1, 0.0) -- Set to overwrite mode
+  softcut.rec_level(1, 1.0)
+  softcut.pre_level(1, 0.0) 
   is_recording = true
-  redraw() -- Update UI to show REC
+  redraw()
 end
 
 function stop_recording()
@@ -52,37 +56,20 @@ function stop_recording()
     duration = Phys.snap_to_interval(duration, Phys.get_beat_sec() * 4) 
   end
   
-  if params:get("master_toggle") == 2 then
-    if master_duration == -1 then 
-      master_duration = duration 
-    else 
-      duration = Phys.snap_to_interval(duration, master_duration) 
-    end
+  master_duration = duration -- Define the cycle for temporal decay
+  
+  -- Apply loop length to all voices to keep the strata aligned
+  for i = 1, 6 do
+    softcut.loop_end(i, master_duration)
   end
 
-  softcut.loop_end(1, duration)
   softcut.rec(1, 0)
-  softcut.rec_level(1, 0.0) -- Disarm recording head
-  softcut.pre_level(1, 1.0) -- Set to preserve mode for loop
+  softcut.rec_level(1, 0.0)
+  softcut.pre_level(1, 1.0)
   is_recording = false
+  
   advance_strata()
-  redraw() -- Update UI to hide REC
-end
-
-function handle_event(idx, e)
-  if e.type == "bubble_pop" then
-    softcut.rate(idx, e.rate_shift)
-    clock.run(function() 
-      clock.sleep(0.1) 
-      softcut.rate(idx, 1.0) 
-    end)
-  elseif e.type == "seismic_crack" then
-    softcut.rec_level(idx, 1.4)
-    clock.run(function() 
-      clock.sleep(e.duration) 
-      softcut.rec_level(idx, 1.0) 
-    end)
-  end
+  redraw()
 end
 
 ---------------------------------------------------------
@@ -95,17 +82,29 @@ function physics_loop()
     for i, l in ipairs(layers) do
       local depth = Phys.calculate_layer_depth(i, active_layers)
       l.pressure_mem = Phys.interpolate(l.pressure_mem, excavation_pressure * depth, 0.1)
-      local event = Env.get_random_event(current_env, l.pressure_mem, i, weather_intensity)
-      if event then handle_event(i, event) end
     end
   end
 end
 
 function audio_update_loop()
+  local dt = 1/30
   while true do
-    clock.sleep(1/30)
+    clock.sleep(dt)
+    
+    -- TEMPORAL DECAY LOGIC
+    if master_duration > 0 and not is_recording then
+      local decay_amt = params:get("decay") / 100
+      for i = 1, 6 do
+        -- Calculate loss: (Rate per cycle) * (Percentage of cycle elapsed in one tick)
+        local loss = decay_amt * (dt / master_duration)
+        layers[i].gain_mem = math.max(0, layers[i].gain_mem - loss)
+      end
+    end
+
     for i, l in ipairs(layers) do
       local p = Env.get_params(current_env, l.pressure_mem, i, weather_intensity)
+      -- Apply temporal decay to the environmental gain
+      p.gain = p.gain * l.gain_mem
       Soft.apply_params(i, p)
     end
   end
@@ -120,17 +119,19 @@ function init()
   layers = {}
   
   for i = 1, 6 do
-    layers[i] = { voice = i, pressure_mem = 0, active = true }
+    layers[i] = { voice = i, pressure_mem = 0, gain_mem = 1.0, active = true }
     Soft.setup_voice(i, 60)
   end
 
   params:add_separator("ARCHAEOLOGY")
   params:add_option("mode", "Rec Mode", {"Auto", "Manual"}, 1)
   params:set_action("mode", function(x) is_manual = (x == 2) end)
+  
+  -- New Decay Parameter
+  params:add_control("decay", "Temporal Decay", controlspec.new(0, 100, "lin", 1, 15, "%"))
 
   params:add_separator("TIMING")
   params:add_option("sync_mode", "Sync", {"Free", "Beat", "Bar"}, 1)
-  params:add_option("master_toggle", "Master Sync", {"Off", "On"}, 2)
   params:add_control("silence_time", "Silence Time", controlspec.new(0.5, 10, "lin", 0.1, 2))
 
   params:add_option("environment", "Environment", Env.list, 3) 
@@ -163,9 +164,6 @@ end
 
 function key(n, z)
   if n == 1 then alt_held = (z == 1) end
-  if n == 2 then key_2_down = (z == 1) end
-  if n == 3 then key_3_down = (z == 1) end
-
   if z == 1 then
     if alt_held then
       if n == 2 then show_help = not show_help
