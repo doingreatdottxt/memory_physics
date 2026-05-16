@@ -11,10 +11,10 @@ local physics = {
 function init()
   setup_params()
   
-  -- Re-register OSC with explicit path check
+  -- Register incoming amp tracker data for auto-record behavior
   osc.event = function(path, args, from)
     if path == "/in_amp" and params:get("auto_record") == 2 then
-      local amp = args[3] -- SendReply data starts at index 3 on Norns
+      local amp = args[3] 
       if not physics.recording and amp > params:get("threshold") then
         toggle_formation()
       elseif physics.recording and amp < (params:get("threshold") * 0.5) then
@@ -40,7 +40,7 @@ function setup_params()
   params:add_control("release_time", "THRES: RELEASE (S)", controlspec.new(0.1, 5.0, 'lin', 0.1, 1.0))
   
   -- Reintegrated Environment Option using environments.lua specifications
-  params:add_option("environment", "ENVIRONMENT", envs.list, 3) -- Defaults to "Grove"
+  params:add_option("environment", "ENVIRONMENT", envs.list, 3) -- Defaults to Index 3 ("Grove")
   params:set_action("environment", function(x)
     local env_name = envs.list[x]
     local d = envs.data[env_name]
