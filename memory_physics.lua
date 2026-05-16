@@ -18,33 +18,33 @@ local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 function init()
     setup_params()
 
-    -- FIX: Use dedicated osc.add listeners instead of generic osc.event fallback
-    osc.add("/in_amp", function(msg, from)
-        if params:get("auto_record") == 2 then
-            local amp = msg[3]
-            if not physics.recording and amp > params:get("threshold") then
-                toggle_formation()
-            elseif physics.recording then
-                if amp < (params:get("threshold") * 0.5) then
-                    physics.silence_frames = physics.silence_frames + 1
-                    if physics.silence_frames > (params:get("release_time") * 15) then 
-                        toggle_formation()
+    -- FIXED: Reverted to native norns global osc.event handler for stable trigger interception
+    osc.event = function(path, args, from)
+        if path == "/in_amp" then
+            if params:get("auto_record") == 2 then
+                local amp = args[3]
+                if not physics.recording and amp > params:get("threshold") then
+                    toggle_formation()
+                elseif physics.recording then
+                    if amp < (params:get("threshold") * 0.5) then
+                        physics.silence_frames = physics.silence_frames + 1
+                        if physics.silence_frames > (params:get("release_time") * 15) then 
+                            toggle_formation()
+                            physics.silence_frames = 0
+                        end
+                    else
                         physics.silence_frames = 0
                     end
-                else
-                    physics.silence_frames = 0
                 end
             end
+        elseif path == "/layer_phase" then
+            local layer_idx = math.floor(args[3] + 1)
+            local phase_val = args[4]
+            if layer_idx >= 1 and layer_idx <= physics.max_layers then
+                layer_phases[layer_idx] = phase_val
+            end
         end
-    end)
-
-    osc.add("/layer_phase", function(msg, from)
-        local layer_idx = math.floor(msg[3] + 1)
-        local phase_val = msg[4]
-        if layer_idx >= 1 and layer_idx <= physics.max_layers then
-            layer_phases[layer_idx] = phase_val
-        end
-    end)
+    end
 
     redraw_metro = metro.init(function() redraw() end, 1/15)
     redraw_metro:start()
@@ -98,7 +98,7 @@ function toggle_formation()
         physics.duration = math.max(0.5, util.time() - physics.start_time)
         engine.record_stop()
         
-        -- FIX: Shift and commit directly on completion block, passing duration parameters
+        -- Commits safely to the surface layer and pushes previous loops downward
         engine.shift_layers(physics.duration)
         physics.layers_active = math.min(physics.max_layers, physics.layers_active + 1)
     end
