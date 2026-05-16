@@ -20,7 +20,7 @@ Engine_MemoryPhysics : CroneEngine {
         envBus = Bus.control(context.server, 1).set(0);
         volBus = Bus.control(context.server, 1).set(1.0);
         durBus = Bus.control(context.server, maxLayers);
-        durBus.setAll(2.0); // COMPLIANCE FIX: Duration buses explicitly mirror 2.0s rule default
+        durBus.setAll(2.0);
         durations = Array.fill(maxLayers, { 2.0 });
 
         baseFcBus = Bus.control(context.server, 1).set(8000);
@@ -45,12 +45,10 @@ Engine_MemoryPhysics : CroneEngine {
             mod_rq = In.kr(modRqBus.index, 1);
             drift = In.kr(driftBus.index, 1);
 
-            // COMPLIANCE FIX: Exact non-linear pressure attenuation values mapping (0, 10, 25, 40, 60, 80)
             base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]);
             pressure = (In.kr(pressureBus.index, 1) + base_pressure).clip(0, 1);
             p_sq = pressure * pressure;
 
-            // COMPLIANCE FIX: Weather only bleeds to layer 2 if > 80%, capped at 20% max intensity
             layer_weather = Select.kr(depth, [
                 w_val, 
                 (w_val >= 0.8).if(w_val.linlin(0.8, 1.0, 0.0, 0.2), 0.0)
@@ -83,19 +81,20 @@ Engine_MemoryPhysics : CroneEngine {
             sig = RLPF.ar(sig, lpf.lag(0.2), rq.clip(0.01, 2.0));
             sig = sig * (0.95 - (pressure * 0.45));
 
-            // COMPLIANCE FIX: Static volume scale maps strictly to 100%, 50%, 20%, 0%, 0%, 0%
             layer_vol = Select.kr(depth, [1.0, 0.5, 0.2, 0.0, 0.0, 0.0]);
 
             Out.ar(out, sig * v * layer_vol);
         }).add;
 
         SynthDef(\InputTracker, { arg in;
-            var input_signal = In.ar(in, 1);
-            SendReply.kr(Impulse.kr(10), '/in_amp', [Amplitude.kr(input_signal)], 999);
+            // BUG FIX: Capture stereo field properly for amplitude tracking
+            var input_signal = In.ar(in, 2);
+            SendReply.kr(Impulse.kr(15), '/in_amp', [Amplitude.kr(Mix.ar(input_signal))], 999);
         }).add;
 
         SynthDef(\SurfaceRecorder, { arg buf, in;
-            RecordBuf.ar(In.ar(in, 1), buf, recLevel: 1.0, preLevel: 0.0, loop: 0, doneAction: 2);
+            // BUG FIX: Read stereo array to match the 2-channel buffer allocation
+            RecordBuf.ar(In.ar(in, 2), buf, recLevel: 1.0, preLevel: 0.0, loop: 0, doneAction: 2);
         }).add;
 
         context.server.sync;
@@ -108,7 +107,9 @@ Engine_MemoryPhysics : CroneEngine {
 
         this.addCommand(\shift_layers, "", {
             (maxLayers - 1).reverseDo({ arg i;
-                if(i > 0) { buffers[i].copyData(buffers[i - 1]); }
+                // BUG FIX: copyData moves FROM the designated array object TO the parameter object
+                // We need to shift downwards from [i-1] into [i]
+                if(i > 0) { buffers[i - 1].copyData(buffers[i]); }
             });
             buffers[0].zero;
             
@@ -122,7 +123,6 @@ Engine_MemoryPhysics : CroneEngine {
             context.server.sendMsg("/c_set", durBus.index, 2.0);
         });
 
-        // COMPLIANCE FIX: Added to wipe array data from memory when Site Excavation rule applies
         this.addCommand(\clear_layers, "", {
             buffers.do({ arg b; b.zero; });
         });
