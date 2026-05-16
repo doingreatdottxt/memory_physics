@@ -3,6 +3,7 @@ Engine_MemoryPhysics : CroneEngine {
     var <buffers, <synths, <recSynth, <maxLayers = 6;
     var <phaseBus, <weatherBus, <pressureBus, <envBus, <volBus, <durBus;
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
+    var <durations; // Internal tracking array to allow duration shifting
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
@@ -18,7 +19,11 @@ Engine_MemoryPhysics : CroneEngine {
         pressureBus = Bus.control(context.server, 1).set(0.0);
         envBus = Bus.control(context.server, 1).set(0);
         volBus = Bus.control(context.server, 1).set(1.0);
-        durBus = Bus.control(context.server, maxLayers).set(5.0);
+        
+        // Properly initialize all 6 channels of the duration control bus to 5.0 seconds
+        durBus = Bus.control(context.server, maxLayers);
+        durBus.setAll(5.0);
+        durations = Array.fill(maxLayers, { 5.0 });
 
         // Environment structural parameter buses mapped from environments.lua
         baseFcBus = Bus.control(context.server, 1).set(8000);
@@ -85,22 +90,32 @@ Engine_MemoryPhysics : CroneEngine {
 
         context.server.sync;
 
-        // Fixed: pointing directly to the stereo bus index wrapper without an array offset
         synths = Array.fill(maxLayers, { arg i;
             Synth(\StrataLayer, [\buf, buffers[i], \out, context.out_b.index, \depth, i, \dur_idx, i, \phase_out, phaseBus.index + i], context.xg);
         });
 
-        // context.in_b is an array of mono buses, so index tracking here remains intact
         Synth(\InputTracker, [\in, context.in_b[0].index], context.xg);
 
         this.addCommand(\shift_layers, "", {
+            // Shift audio data down the layer stack
             (maxLayers - 1).reverseDo({ arg i;
                 if(i > 0) { buffers[i].copyData(buffers[i - 1]); }
             });
             buffers[0].zero;
+
+            // Shift corresponding layer loop lengths down alongside the audio
+            (maxLayers - 1).reverseDo({ arg i;
+                if(i > 0) {
+                    durations[i] = durations[i - 1];
+                    context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
+                }
+            });
+            durations[0] = 5.0;
+            context.server.sendMsg("/c_set", durBus.index, 5.0);
         });
 
         this.addCommand(\set_duration, "if", { arg msg;
+            durations[msg[1]] = msg[2];
             context.server.sendMsg("/c_set", durBus.index + msg[1], msg[2]);
         });
 
@@ -112,10 +127,11 @@ Engine_MemoryPhysics : CroneEngine {
             recSynth.free;
         });
 
-        this.addCommand(\set_weather, "f", { arg v; weatherBus.set(v); });
-        this.addCommand(\set_pressure, "f", { arg v; pressureBus.set(v); });
-        this.addCommand(\set_env, "i", { arg v; envBus.set(v); });
-        this.addCommand(\set_volume, "f", { arg v; volBus.set(v); });
+        // Fixed: Targeting msg[1] ensures we parse the values instead of the raw OSC arrays
+        this.addCommand(\set_weather, "f", { arg msg; weatherBus.set(msg[1]); });
+        this.addCommand(\set_pressure, "f", { arg msg; pressureBus.set(msg[1]); });
+        this.addCommand(\set_env, "i", { arg msg; envBus.set(msg[1]); });
+        this.addCommand(\set_volume, "f", { arg msg; volBus.set(msg[1]); });
 
         this.addCommand(\set_environment_params, "fffff", { arg msg;
             baseFcBus.set(msg[1]);
