@@ -11,7 +11,7 @@ Extreme environmental factors are allowed to effect layers below within specific
 
 Effects and Modulation-
 
-Granular synthesis engine - capable of creating fine grains or chunking and combining layers. Fine blowing grains in sand, pressure squishing the edges of layers together in muddy environments, Cracking layers shifting and recombining diring seismic activity.
+Granular synthesis engine - capable of creating fine grains or chunking and combining layers. Fine blowing grains in sand, pressure squishing the edges of layers together in muddy environments, Cracking layers shifting and recombining from seismic activity.
 
 White/Pink/Brown noise generator - running in concert with audio recordings. eg. undulating waves in the top layer of Sea, whipping winds in mountain, deep shifting pressures.
 
@@ -45,5 +45,5 @@ Control scheme -
 Visual Feedback
   Header - "STABLE" or "FORMING STRATA" and recording timer
   Center - Strata Stack : Six stacked horizontal pictograms representing the buffers as soil layers. top layer should have visual cues to the environment. deeper layer should become increasingly rocky. Playhead: A vertical line scrolls across the Surface Layer (top bar) to show the current loop position.
-  Footer - Weather level / pressure level
+  Footer - Weather level / pressure level , active environment
 
