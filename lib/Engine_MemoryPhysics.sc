@@ -1,6 +1,7 @@
 // lib/Engine_MemoryPhysics.sc
 Engine_MemoryPhysics : CroneEngine {
     var <buffers, <synths, <recSynth, <maxLayers = 6;
+    var <recBuffer; // FIX: Added dedicated record buffer to avoid active playback collision
     var <phaseBus, <weatherBus, <pressureBus, <envBus, <volBus, <durBus;
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
     var <durations;
@@ -13,6 +14,9 @@ Engine_MemoryPhysics : CroneEngine {
         buffers = Array.fill(maxLayers, {
             Buffer.alloc(context.server, context.server.sampleRate * 20, 2);
         });
+
+        // Allocate the isolated recording space
+        recBuffer = Buffer.alloc(context.server, context.server.sampleRate * 20, 2);
 
         phaseBus = Bus.control(context.server, maxLayers);
         weatherBus = Bus.control(context.server, 1).set(0.2); 
@@ -33,7 +37,7 @@ Engine_MemoryPhysics : CroneEngine {
             var sig, pressure, lpf, phase, noise, w_val, env, v, duration;
             var base_fc, mod_fc, base_rq, mod_rq, drift, p_sq, rq, layer_weather, rate;
             var drive, bits, target_sr, crackle, seismic_jitter;
-            var layer_vol, base_pressure;
+            var layer_vol, base_pressure, w_gate;
 
             w_val = In.kr(weatherBus.index, 1);
             v = In.kr(volBus.index, 1);
@@ -49,9 +53,11 @@ Engine_MemoryPhysics : CroneEngine {
             pressure = (In.kr(pressureBus.index, 1) + base_pressure).clip(0, 1);
             p_sq = pressure * pressure;
 
+            -- FIX: Multiplier math logic replaced language-side .if block to stabilize server audio graph
+            w_gate = w_val >= 0.8;
             layer_weather = Select.kr(depth, [
                 w_val, 
-                (w_val >= 0.8).if(w_val.linlin(0.8, 1.0, 0.0, 0.2), 0.0)
+                w_gate * w_val.linlin(0.8, 1.0, 0.0, 0.2)
             ] ++ Array.fill(maxLayers - 2, { 0.0 }));
 
             crackle = Dust.kr(layer_weather.linlin(0, 1, 0, 45) * (pressure + 0.1));
@@ -87,13 +93,11 @@ Engine_MemoryPhysics : CroneEngine {
         }).add;
 
         SynthDef(\InputTracker, { arg in;
-            // BUG FIX: Capture stereo field properly for amplitude tracking
             var input_signal = In.ar(in, 2);
             SendReply.kr(Impulse.kr(15), '/in_amp', [Amplitude.kr(Mix.ar(input_signal))], 999);
         }).add;
 
         SynthDef(\SurfaceRecorder, { arg buf, in;
-            // BUG FIX: Read stereo array to match the 2-channel buffer allocation
             RecordBuf.ar(In.ar(in, 2), buf, recLevel: 1.0, preLevel: 0.0, loop: 0, doneAction: 2);
         }).add;
 
@@ -105,13 +109,16 @@ Engine_MemoryPhysics : CroneEngine {
 
         Synth(\InputTracker, [\in, context.in_b[0].index], context.xg);
 
-        this.addCommand(\shift_layers, "", {
+        -- FIX: shift_layers now handles the final commit process and dynamic duration parameter assignment
+        this.addCommand(\shift_layers, "f", { arg msg;
+            var new_dur = msg[1];
+            
             (maxLayers - 1).reverseDo({ arg i;
-                // BUG FIX: copyData moves FROM the designated array object TO the parameter object
-                // We need to shift downwards from [i-1] into [i]
                 if(i > 0) { buffers[i - 1].copyData(buffers[i]); }
             });
-            buffers[0].zero;
+            
+            -- Print isolation buffer into active surface loop slot
+            recBuffer.copyData(buffers[0]);
             
             (maxLayers - 1).reverseDo({ arg i;
                 if(i > 0) {
@@ -119,12 +126,13 @@ Engine_MemoryPhysics : CroneEngine {
                     context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
                 }
             });
-            durations[0] = 2.0;
-            context.server.sendMsg("/c_set", durBus.index, 2.0);
+            durations[0] = new_dur;
+            context.server.sendMsg("/c_set", durBus.index, new_dur);
         });
 
         this.addCommand(\clear_layers, "", {
             buffers.do({ arg b; b.zero; });
+            recBuffer.zero;
         });
 
         this.addCommand(\set_duration, "if", { arg msg;
@@ -133,7 +141,8 @@ Engine_MemoryPhysics : CroneEngine {
         });
 
         this.addCommand(\record_start, "", {
-            recSynth = Synth(\SurfaceRecorder, [\buf, buffers[0], \in, context.in_b[0].index], context.xg);
+            recBuffer.zero; -- Clear previous temporary artifact captures
+            recSynth = Synth(\SurfaceRecorder, [\buf, recBuffer, \in, context.in_b[0].index], context.xg);
         });
 
         this.addCommand(\record_stop, "", {
