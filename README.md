@@ -12,7 +12,8 @@ Pressure effects increase as "Strata" are burried deeper. 0% at surface layer, 1
 
 - Defining "Environment" "Pressure", and "Weather" Effects -
 
-  "Wind" Spectrum - Pink Noise Generator.  Semi-randonized frequency, length, panning, and intensity relative to effect intensity. each "Wind" should use an Attack Sustain Release envelope with an Attack length of 40%, and a release 15% from the end
+  "Breeze" Pink Noise Generator. Subtle semi-randonized frequency, length, panning, and intensity relative to effect intensity. each "Breeze" should use an Attack Sustain Release envelope with an Attack length of 40%, and a release 15% from the end
+  "Wind" - Pink Noise Generator. Moderate Semi-randonized frequency, length, panning, and intensity relative to effect intensity. each "Wind" should use an Attack Sustain Release envelope with an Attack length of 40%, and a release 15% from the end
   "Rain" -single return delay effect
   "Dry" - Moderate band pass and high pass filters 
   "Damp" - moderate Low Pass and band rejection filter
@@ -20,30 +21,31 @@ Pressure effects increase as "Strata" are burried deeper. 0% at surface layer, 1
   "Cool" subtle distortion and low end noise gate threshold
   "Warm" -Subtle time stretching, saturation, and warble
   "Hot" - moderate time stretching, saturation, and warble
-  "Storm" - subtle Granular dislocation of audio fragments, increases intensity of existing "Weather" effects
-  "Deep" - More substantial low pass filter
+  "Storm" - subtle Granular dislocation of audio fragments, increases intensity of existing "Weather" effects when "Weather" is above 80%
+  "Deep" - substantial low pass filter
   "Waves"  - White Noise Generator. length, panning, and intensity relative to effect intensity. each "Wave" should use an Attack Sustain Release envelope with an Attack length of 25%, and a release 35% from the end
-  "Chirps" 50ms-150ms pitch shifted grains . Pitch shift 2-4 octaves up from original audio
+  "Chirps" Randomized 50ms-150ms pitch shifted grains Pitch shift 2-4 octaves up from original audio. 0-2 chirps per second
+  "Hollow" Subtle Reverb and Delay
 
 - Effect modifiers -
 - "Very" - increase 30%
-- 
+- "Some" - Decrease 30%
 
 -"Environment"s-
 
-"Grove" -  Damp, Warm, Chirps
+"Grove" -  Damp, Warm, Chirps, Breeze, Rain when "Weather" is >50%
 
-"Sand" - Subtle High Pass filter. 
+"Sand" - Dry, Wind, Hot
 
-"Mountain" - 
+"Mountain" - Cold, Wind, Dry
 
-"River Bank" -  
+"River Bank" -  Damp, Rain, Cool, breeze, Chirps
 
-"Sea" -  
+"Sea" -  Cool, Waves, Breeze When "Weather" below 50%, Wind when "Weather" above 50%
 
-"Swamp" - 
+"Swamp" - Very Damp, Warm, Some Rain, Some Chirp
 
-"Cave" - 
+"Cave" - Hollow, Damp, Rain, Chirp
 
 
 
