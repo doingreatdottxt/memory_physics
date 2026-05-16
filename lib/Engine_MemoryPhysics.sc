@@ -3,7 +3,7 @@ Engine_MemoryPhysics : CroneEngine {
     var <buffers, <synths, <recSynth, <maxLayers = 6;
     var <phaseBus, <weatherBus, <pressureBus, <envBus, <volBus, <durBus;
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
-    var <durations; // Internal tracking array to allow duration shifting
+    var <durations; 
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
@@ -20,12 +20,10 @@ Engine_MemoryPhysics : CroneEngine {
         envBus = Bus.control(context.server, 1).set(0);
         volBus = Bus.control(context.server, 1).set(1.0);
         
-        // Properly initialize all 6 channels of the duration control bus to 5.0 seconds
         durBus = Bus.control(context.server, maxLayers);
         durBus.setAll(5.0);
         durations = Array.fill(maxLayers, { 5.0 });
 
-        // Environment structural parameter buses mapped from environments.lua
         baseFcBus = Bus.control(context.server, 1).set(8000);
         modFcBus = Bus.control(context.server, 1).set(7500);
         baseRqBus = Bus.control(context.server, 1).set(1.2);
@@ -35,6 +33,7 @@ Engine_MemoryPhysics : CroneEngine {
         SynthDef(\StrataLayer, { arg buf, out, depth=0, phase_out, dur_idx;
             var sig, pressure, lpf, phase, noise, w_val, env, v, duration;
             var base_fc, mod_fc, base_rq, mod_rq, drift, p_sq, rq, layer_weather, rate;
+            var drive, bits, target_sr, crackle, seismic_jitter;
 
             w_val = In.kr(weatherBus.index, 1);
             v = In.kr(volBus.index, 1);
@@ -47,39 +46,59 @@ Engine_MemoryPhysics : CroneEngine {
             mod_rq = In.kr(modRqBus.index, 1);
             drift = In.kr(driftBus.index, 1);
 
+            // Total pressure is a combination of global override and layer depth index
             pressure = (In.kr(pressureBus.index, 1) + (depth / (maxLayers - 1))).clip(0, 1);
             p_sq = pressure * pressure;
 
-            // Dynamic playback rate tracking weather seepage per layer index depth
+            // Environmental Weather Erosion: Most intense on top layer, slightly bleeds into layer 2
             layer_weather = Select.kr(depth, [
                 w_val,
                 (w_val >= 0.8).if(w_val * 0.25, 0)
             ] ++ Array.fill(maxLayers - 2, { 0 }));
 
-            rate = 1.0 + (SinOsc.kr(drift * 25) * (layer_weather * drift));
+            // Seismic Cracking: Extreme weather and high pressure cause micro-fractures in loop playback rate
+            crackle = Dust.kr(layer_weather.linlin(0, 1, 0, 45) * (pressure + 0.1));
+            seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
+            
+            rate = 1.0 + (SinOsc.kr(drift * 25) * (layer_weather * drift)) + seismic_jitter;
 
             phase = Phasor.ar(0, BufRateScale.kr(buf) * rate, 0, duration * BufSampleRate.kr(buf));
             sig = BufRd.ar(2, buf, phase, loop: 1);
-            Out.kr(phase_out, phase / (duration * BufSampleRate.kr(buf)));
+            
+            // Send normalized playhead phase value back to Norns via OSC at 15Hz
+            SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            // Weather Noise Texturing (Summed to Strata Signal)
+            // Atmospheric Weather Noise Generation
             noise = Select.ar(env % 3, [
-                BrownNoise.ar(0.1),
-                Dust.ar(10) * 0.5,
-                PinkNoise.ar(0.1)
-            ]) * w_val;
+                BrownNoise.ar(0.08),
+                Dust.ar(12) * 0.4,
+                PinkNoise.ar(0.08)
+            ]) * layer_weather;
 
-            // Filtering and dynamic geology modeling mirroring environments.lua formula
-            lpf = (base_fc - (p_sq * mod_fc)).clip(20, 20000);
+            sig = sig + noise;
+
+            // --- PRESSURE DEGRADATION ENGINE ---
+            // 1. Saturation / Compression (Geological Compaction)
+            drive = pressure.linexp(0, 1, 1, 6.5);
+            sig = (sig * drive).tanh * (1.0 - (pressure * 0.25));
+
+            // 2. Bitcrushing & Sample-Rate Reduction (Crystallization / Compaction Distortion)
+            bits = pressure.linlin(0, 1, 24, 5).round(1);
+            target_sr = pressure.linexp(0, 1, 48000, 11025);
+            sig = sig.round(0.5 ** bits);
+            sig = Latch.ar(sig, Impulse.ar(target_sr));
+
+            // 3. Bi-quad Structural Filtering
+            lpf = (base_fc - (p_sq * mod_fc)).clip(35, 20000);
             rq = base_rq + (p_sq * mod_rq);
+            sig = RLPF.ar(sig, lpf.lag(0.2), rq.clip(0.01, 2.0));
 
-            sig = RLPF.ar(sig + noise, lpf.lag(0.2), rq.clip(0.01, 2.0));
-            sig = sig * (0.9 - (pressure * 0.4)); // Depth-based attenuation
+            // Depth-based attenuation matrix
+            sig = sig * (0.95 - (pressure * 0.45)); 
 
             Out.ar(out, sig * v);
         }).add;
 
-        // Input monitoring for Auto-Record
         SynthDef(\InputTracker, { arg in;
             SendReply.kr(Impulse.kr(10), '/in_amp', [Amplitude.kr(Mix(In.ar(in, 2)))], 999);
         }).add;
@@ -91,19 +110,17 @@ Engine_MemoryPhysics : CroneEngine {
         context.server.sync;
 
         synths = Array.fill(maxLayers, { arg i;
-            Synth(\StrataLayer, [\buf, buffers[i], \out, context.out_b.index, \depth, i, \dur_idx, i, \phase_out, phaseBus.index + i], context.xg);
+            Synth(\StrataLayer, [\buf, buffers[i], \out, context.out_b.index, \depth, i, \dur_idx, i], context.xg);
         });
 
         Synth(\InputTracker, [\in, context.in_b[0].index], context.xg);
 
         this.addCommand(\shift_layers, "", {
-            // Shift audio data down the layer stack
             (maxLayers - 1).reverseDo({ arg i;
                 if(i > 0) { buffers[i].copyData(buffers[i - 1]); }
             });
             buffers[0].zero;
 
-            // Shift corresponding layer loop lengths down alongside the audio
             (maxLayers - 1).reverseDo({ arg i;
                 if(i > 0) {
                     durations[i] = durations[i - 1];
@@ -127,7 +144,6 @@ Engine_MemoryPhysics : CroneEngine {
             recSynth.free;
         });
 
-        // Fixed: Targeting msg[1] ensures we parse the values instead of the raw OSC arrays
         this.addCommand(\set_weather, "f", { arg msg; weatherBus.set(msg[1]); });
         this.addCommand(\set_pressure, "f", { arg msg; pressureBus.set(msg[1]); });
         this.addCommand(\set_env, "i", { arg msg; envBus.set(msg[1]); });
