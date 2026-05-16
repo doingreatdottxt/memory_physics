@@ -6,7 +6,7 @@ local envs = include("lib/environments")
 local physics = {
     recording = false,
     start_time = 0,
-    duration = 5,
+    duration = 2, -- COMPLIANCE FIX: Initial duration default aligns with 2-second logic
     layers_active = 0,
     max_layers = 6,
     shift_held = false,
@@ -57,23 +57,23 @@ function setup_params()
     params:add_control("main_vol", "GLOBAL VOLUME", controlspec.new(0, 2, 'lin', 0.01, 1.0))
     params:set_action("main_vol", function(x) engine.set_volume(x) end)
 
-    -- Auto-record default set to 2 ("ON") per rulebook requirements
     params:add_option("auto_record", "AUTO RECORD", {"OFF", "ON"}, 2)
 
     params:add_control("threshold", "THRES: TRIGGER", controlspec.new(0.001, 1.0, 'exp', 0.001, 0.05))
-    params:add_control("release_time", "THRES: RELEASE (S)", controlspec.new(0.1, 5.0, 'lin', 0.1, 1.0))
+    
+    -- COMPLIANCE FIX: Release timeout default parameter set to 2.0s per README
+    params:add_control("release_time", "THRES: RELEASE (S)", controlspec.new(0.1, 5.0, 'lin', 0.1, 2.0))
 
     params:add_option("environment", "ENVIRONMENT", envs.list, 3)
     params:set_action("environment", function(x)
         local env_name = envs.list[x]
         local d = envs.data[env_name]
-        engine.set_env(x - 1) -- 0-indexed mapping for SuperCollider
+        engine.set_env(x - 1)
         if d then
             engine.set_environment_params(d.base_fc, d.mod_fc, d.base_rq, d.mod_rq, d.drift)
         end
     end)
 
-    -- Weather default intensity explicitly set to 0.2 (20% at boot) per spec
     params:add_control("weather", "WEATHER INTENSITY", controlspec.new(0, 1, 'lin', 0.01, 0.2))
     params:set_action("weather", function(x) engine.set_weather(x) end)
 
@@ -102,7 +102,6 @@ function toggle_formation()
         engine.set_duration(0, physics.duration)
         engine.record_stop()
         
-        -- Shift execution and index increment occur on completion block per rulebook
         engine.shift_layers()
         physics.layers_active = math.min(physics.max_layers, physics.layers_active + 1)
     end
@@ -161,20 +160,16 @@ function redraw()
                 screen.line(118, y + 3)
                 screen.stroke()
                 
-                -- Dynamic Environment Visual Cues on Surface Strata
                 if current_env == "Grove" or current_env == "Swamp" then
-                    -- Vegetation ticks
                     screen.move(25, y + 1) screen.line_rel(0, 2)
                     screen.move(70, y + 1) screen.line_rel(0, 2)
                     screen.move(105, y + 1) screen.line_rel(0, 2)
                     screen.stroke()
                 elseif current_env == "Mountain" or current_env == "Sand" then
-                    -- Sharp peaks or dune ridges
                     screen.move(40, y + 3) screen.line_rel(2, -2) screen.line_rel(2, 2)
                     screen.move(85, y + 3) screen.line_rel(2, -2) screen.line_rel(2, 2)
                     screen.stroke()
                 elseif current_env == "Sea" or current_env == "River Bank" then
-                    -- Ripples
                     screen.move(30, y + 2) screen.line_rel(3, 0)
                     screen.move(75, y + 2) screen.line_rel(3, 0)
                     screen.stroke()
@@ -189,7 +184,6 @@ function redraw()
                 end
             end
 
-            -- Real-time scrolling playhead dot synced from SuperCollider
             local p = layer_phases[i] or 0.0
             screen.level(math.floor(math.max(4, 16 - (i * 2))))
             screen.rect(10 + (p * 108), y + 2, 2, 2)
