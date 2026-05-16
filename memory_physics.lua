@@ -8,10 +8,13 @@ local physics = {
   silence_frames = 0
 }
 
+-- Array to hold real-time playhead phase locations computed by SuperCollider
+local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+
 function init()
   setup_params()
   
-  -- Register incoming amp tracker data for auto-record behavior
+  -- Route incoming audio amplitudes and playhead phase positions from SuperCollider
   osc.event = function(path, args, from)
     if path == "/in_amp" and params:get("auto_record") == 2 then
       local amp = args[3] 
@@ -23,6 +26,13 @@ function init()
           toggle_formation()
           physics.silence_frames = 0
         end
+      end
+      
+    elseif path == "/layer_phase" then
+      local layer_idx = math.floor(args[3] + 1) -- Shift 0-indexed SC data to 1-indexed Lua array
+      local phase_val = args[4]
+      if layer_idx >= 1 and layer_idx <= physics.max_layers then
+        layer_phases[layer_idx] = phase_val
       end
     end
   end
@@ -39,8 +49,7 @@ function setup_params()
   params:add_control("threshold", "THRES: TRIGGER", controlspec.new(0.001, 1.0, 'exp', 0.001, 0.05))
   params:add_control("release_time", "THRES: RELEASE (S)", controlspec.new(0.1, 5.0, 'lin', 0.1, 1.0))
   
-  -- Reintegrated Environment Option using environments.lua specifications
-  params:add_option("environment", "ENVIRONMENT", envs.list, 3) -- Defaults to Index 3 ("Grove")
+  params:add_option("environment", "ENVIRONMENT", envs.list, 3) 
   params:set_action("environment", function(x)
     local env_name = envs.list[x]
     local d = envs.data[env_name]
@@ -50,7 +59,7 @@ function setup_params()
     end
   end)
   
-  params:add_control("weather", "WEATHER INTENSITY", controlspec.new(0, 1, 'lin', 0.01, 0.5))
+  params:add_control("weather", "WEATHER INTENSITY", controlspec.new(0, 1, 'lin', 0.01, 0.2)) -- Defaulting to 20% per spec
   params:set_action("weather", function(x) engine.set_weather(x) end)
   params:add_control("pressure", "PRESSURE OVERRIDE", controlspec.new(0, 1, 'lin', 0.01, 0))
   params:set_action("pressure", function(x) engine.set_pressure(x) end)
@@ -93,26 +102,42 @@ end
 -- VISUALS
 function redraw()
   screen.clear()
+  
+  -- Header Layout
   screen.level(physics.recording and 15 or 3)
   screen.move(0, 8)
   local status = physics.recording and "FORMING STRATA" or "STABLE"
   screen.text(status .. " [" .. string.format("%.1f", physics.duration) .. "s]")
   
+  -- Center Layout: Geological Strata Stack Display
   for i=1, 6 do
     local y = 14 + (i * 7)
     if i <= physics.layers_active then
-      screen.level(math.max(1, 10 - i))
-      screen.move(10, y+3); screen.line(118, y+3); screen.stroke()
-      if i == 1 then
-        local p = ((util.time() - physics.start_time) % physics.duration) / physics.duration
-        screen.level(15); screen.move(10 + (p * 106), y - 1); screen.line_rel(0, 5); screen.stroke()
-      end
+      screen.level(math.max(1, 11 - (i * 1.5)))
+      screen.move(10, y + 3)
+      screen.line(118, y + 3)
+      screen.stroke()
+      
+      -- Real-time scrolling vertical playhead rendering synced from SuperCollider
+      local p = layer_phases[i]
+      screen.level(math.max(4, 16 - (i * 2)))
+      screen.move(10 + (p * 108), y - 1)
+      screen.line_rel(0, 4)
+      screen.stroke()
     else
-      screen.level(1); screen.move(20, y+3); screen.line(100, y+3); screen.stroke()
+      -- Unformed / Empty sub-soil bedrock slots
+      screen.level(1)
+      screen.move(20, y + 3)
+      screen.line(100, y + 3)
+      screen.stroke()
     end
   end
   
-  screen.level(3); screen.move(0, 62)
-  screen.text("V:" .. math.floor(params:get("main_vol")*100) .. "% W:" .. math.floor(params:get("weather")*100) .. "% P:" .. math.floor(params:get("pressure")*100) .. "%")
+  -- Footer Layout
+  screen.level(3)
+  screen.move(0, 62)
+  local env_label = envs.list[params:get("environment")]
+  screen.text(env_label .. " | W:" .. math.floor(params:get("weather")*100) .. "% P:" .. math.floor(params:get("pressure")*100) .. "%")
+  
   screen.update()
 end
