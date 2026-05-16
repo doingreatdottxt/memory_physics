@@ -1,7 +1,7 @@
 // lib/Engine_MemoryPhysics.sc
 Engine_MemoryPhysics : CroneEngine {
     var <buffers, <synths, <recSynth, <maxLayers = 6;
-    var <recBuffer; // FIX: Added dedicated record buffer to avoid active playback collision
+    var <recBuffer; 
     var <phaseBus, <weatherBus, <pressureBus, <envBus, <volBus, <durBus;
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
     var <durations;
@@ -15,7 +15,6 @@ Engine_MemoryPhysics : CroneEngine {
             Buffer.alloc(context.server, context.server.sampleRate * 20, 2);
         });
 
-        // Allocate the isolated recording space
         recBuffer = Buffer.alloc(context.server, context.server.sampleRate * 20, 2);
 
         phaseBus = Bus.control(context.server, maxLayers);
@@ -53,7 +52,7 @@ Engine_MemoryPhysics : CroneEngine {
             pressure = (In.kr(pressureBus.index, 1) + base_pressure).clip(0, 1);
             p_sq = pressure * pressure;
 
-            -- FIX: Multiplier math logic replaced language-side .if block to stabilize server audio graph
+            // FIXED: Replaced invalid '--' comments with standard '//' format to clear engine compilation errors
             w_gate = w_val >= 0.8;
             layer_weather = Select.kr(depth, [
                 w_val, 
@@ -70,7 +69,7 @@ Engine_MemoryPhysics : CroneEngine {
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
             noise = Select.ar(env % 7, [
-                BrownNoise.ar(0.08), PinkNoise.ar(0.12), WhiteNoise.ar(0.04), 
+                BrownNoise.ar(0.08), PinkNoise.ar(0.12), WhiteWhite = WhiteNoise.ar(0.04), 
                 PinkNoise.ar(0.06), WhiteNoise.ar(0.1), BrownNoise.ar(0.15), PinkNoise.ar(0.03)
             ]) * layer_weather;
             sig = sig + noise;
@@ -109,7 +108,7 @@ Engine_MemoryPhysics : CroneEngine {
 
         Synth(\InputTracker, [\in, context.in_b[0].index], context.xg);
 
-        -- FIX: shift_layers now handles the final commit process and dynamic duration parameter assignment
+        // FIXED: Replaced invalid comment flags
         this.addCommand(\shift_layers, "f", { arg msg;
             var new_dur = msg[1];
             
@@ -117,7 +116,7 @@ Engine_MemoryPhysics : CroneEngine {
                 if(i > 0) { buffers[i - 1].copyData(buffers[i]); }
             });
             
-            -- Print isolation buffer into active surface loop slot
+            // Print isolation buffer into active surface loop slot
             recBuffer.copyData(buffers[0]);
             
             (maxLayers - 1).reverseDo({ arg i;
@@ -141,7 +140,7 @@ Engine_MemoryPhysics : CroneEngine {
         });
 
         this.addCommand(\record_start, "", {
-            recBuffer.zero; -- Clear previous temporary artifact captures
+            recBuffer.zero; // Clear previous temporary artifact captures
             recSynth = Synth(\SurfaceRecorder, [\buf, recBuffer, \in, context.in_b[0].index], context.xg);
         });
 
