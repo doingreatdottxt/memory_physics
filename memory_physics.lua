@@ -6,20 +6,18 @@ local envs = include("lib/environments")
 local physics = {
     recording = false,
     start_time = 0,
-    duration = 2, -- COMPLIANCE FIX: Initial duration default aligns with 2-second logic
+    duration = 2, 
     layers_active = 0,
     max_layers = 6,
     shift_held = false,
     silence_frames = 0
 }
 
--- Array to hold real-time playhead phase locations computed by SuperCollider
 local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
 function init()
     setup_params()
 
-    -- Route incoming audio amplitudes and playhead phase positions from SuperCollider
     osc.event = function(path, args, from)
         if path == "/in_amp" and params:get("auto_record") == 2 then
             local amp = args[3]
@@ -28,18 +26,16 @@ function init()
             elseif physics.recording then
                 if amp < (params:get("threshold") * 0.5) then
                     physics.silence_frames = physics.silence_frames + 1
-                    -- Adjusted to *15 since redraw metro is running at 15fps
                     if physics.silence_frames > (params:get("release_time") * 15) then 
                         toggle_formation()
                         physics.silence_frames = 0
                     end
                 else
-                    -- Reset silence frames if audio returns during the release window
                     physics.silence_frames = 0
                 end
             end
         elseif path == "/layer_phase" then
-            local layer_idx = math.floor(args[3] + 1) -- Shift 0-indexed SC data to 1-indexed Lua array
+            local layer_idx = math.floor(args[3] + 1)
             local phase_val = args[4]
             if layer_idx >= 1 and layer_idx <= physics.max_layers then
                 layer_phases[layer_idx] = phase_val
@@ -60,8 +56,6 @@ function setup_params()
     params:add_option("auto_record", "AUTO RECORD", {"OFF", "ON"}, 2)
 
     params:add_control("threshold", "THRES: TRIGGER", controlspec.new(0.001, 1.0, 'exp', 0.001, 0.05))
-    
-    -- COMPLIANCE FIX: Release timeout default parameter set to 2.0s per README
     params:add_control("release_time", "THRES: RELEASE (S)", controlspec.new(0.1, 5.0, 'lin', 0.1, 2.0))
 
     params:add_option("environment", "ENVIRONMENT", envs.list, 3)
@@ -93,6 +87,10 @@ end
 
 function toggle_formation()
     if not physics.recording then
+        -- BUG FIX: Shift layers BEFORE recording starts to clear the surface for the new loop
+        engine.shift_layers()
+        physics.layers_active = math.min(physics.max_layers, physics.layers_active + 1)
+        
         physics.start_time = util.time()
         engine.record_start()
         physics.recording = true
@@ -101,9 +99,6 @@ function toggle_formation()
         physics.duration = math.max(0.5, util.time() - physics.start_time)
         engine.set_duration(0, physics.duration)
         engine.record_stop()
-        
-        engine.shift_layers()
-        physics.layers_active = math.min(physics.max_layers, physics.layers_active + 1)
     end
 end
 
@@ -155,7 +150,6 @@ function redraw()
             screen.level(math.floor(math.max(1, 11 - (i * 1.5))))
             
             if i == 1 then
-                -- Surface layer: smooth line decorated with conditional biome visual cues
                 screen.move(10, y + 3)
                 screen.line(118, y + 3)
                 screen.stroke()
@@ -175,7 +169,6 @@ function redraw()
                     screen.stroke()
                 end
             else
-                -- Deep strata: offset points generate jaggedness based on depth index (increasingly rocky)
                 for x = 10, 118, 4 do
                     local offset = (x % (3 * i)) == 0 and (math.floor(i * 0.5)) or 0
                     screen.move(x, y + 3 + offset)
@@ -189,7 +182,6 @@ function redraw()
             screen.rect(10 + (p * 108), y + 2, 2, 2)
             screen.fill()
         else
-            -- Unformed / Empty sub-soil bedrock slots
             screen.level(1)
             screen.move(20, y + 3)
             screen.line(100, y + 3)
