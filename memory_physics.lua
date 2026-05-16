@@ -34,7 +34,7 @@ function init()
                         physics.silence_frames = 0
                     end
                 else
-                    -- BUG FIX: Reset silence frames if audio returns during the release window
+                    -- Reset silence frames if audio returns during the release window
                     physics.silence_frames = 0
                 end
             end
@@ -57,6 +57,7 @@ function setup_params()
     params:add_control("main_vol", "GLOBAL VOLUME", controlspec.new(0, 2, 'lin', 0.01, 1.0))
     params:set_action("main_vol", function(x) engine.set_volume(x) end)
 
+    -- Auto-record default set to 2 ("ON") per rulebook requirements
     params:add_option("auto_record", "AUTO RECORD", {"OFF", "ON"}, 2)
 
     params:add_control("threshold", "THRES: TRIGGER", controlspec.new(0.001, 1.0, 'exp', 0.001, 0.05))
@@ -66,13 +67,14 @@ function setup_params()
     params:set_action("environment", function(x)
         local env_name = envs.list[x]
         local d = envs.data[env_name]
-        engine.set_env(x - 1)
+        engine.set_env(x - 1) -- 0-indexed mapping for SuperCollider
         if d then
             engine.set_environment_params(d.base_fc, d.mod_fc, d.base_rq, d.mod_rq, d.drift)
         end
     end)
 
-    params:add_control("weather", "WEATHER INTENSITY", controlspec.new(0, 1, 'lin', 0.01, 0.2)) -- Defaulting to 20% per spec
+    -- Weather default intensity explicitly set to 0.2 (20% at boot) per spec
+    params:add_control("weather", "WEATHER INTENSITY", controlspec.new(0, 1, 'lin', 0.01, 0.2))
     params:set_action("weather", function(x) engine.set_weather(x) end)
 
     params:add_control("pressure", "PRESSURE OVERRIDE", controlspec.new(0, 1, 'lin', 0.01, 0))
@@ -100,7 +102,7 @@ function toggle_formation()
         engine.set_duration(0, physics.duration)
         engine.record_stop()
         
-        -- BUG FIX: Moved shift execution to completion block per README rule
+        -- Shift execution and index increment occur on completion block per rulebook
         engine.shift_layers()
         physics.layers_active = math.min(physics.max_layers, physics.layers_active + 1)
     end
@@ -120,7 +122,6 @@ function key(n, z)
         if physics.shift_held then
             params:set("excavate", 1)
         else
-            -- BUG FIX: Force strict ternary toggle logic rather than arbitrary option wrapping
             params:set("auto_record", params:get("auto_record") == 1 and 2 or 1)
         end
     end
@@ -147,20 +148,39 @@ function redraw()
     screen.text(status .. " [" .. string.format("%.1f", physics.duration) .. "s]")
 
     -- Center Layout: Geological Strata Stack Display
+    local current_env = envs.list[params:get("environment")]
     for i = 1, 6 do
         local y = 14 + (i * 7)
 
         if i <= physics.layers_active then
             screen.level(math.floor(math.max(1, 11 - (i * 1.5))))
             
-            -- BUG FIX: Distinct aesthetics. Deeper layers increasingly "rocky"
             if i == 1 then
-                -- Surface layer: smooth
+                -- Surface layer: smooth line decorated with conditional biome visual cues
                 screen.move(10, y + 3)
                 screen.line(118, y + 3)
                 screen.stroke()
+                
+                -- Dynamic Environment Visual Cues on Surface Strata
+                if current_env == "Grove" or current_env == "Swamp" then
+                    -- Vegetation ticks
+                    screen.move(25, y + 1) screen.line_rel(0, 2)
+                    screen.move(70, y + 1) screen.line_rel(0, 2)
+                    screen.move(105, y + 1) screen.line_rel(0, 2)
+                    screen.stroke()
+                elseif current_env == "Mountain" or current_env == "Sand" then
+                    -- Sharp peaks or dune ridges
+                    screen.move(40, y + 3) screen.line_rel(2, -2) screen.line_rel(2, 2)
+                    screen.move(85, y + 3) screen.line_rel(2, -2) screen.line_rel(2, 2)
+                    screen.stroke()
+                elseif current_env == "Sea" or current_env == "River Bank" then
+                    -- Ripples
+                    screen.move(30, y + 2) screen.line_rel(3, 0)
+                    screen.move(75, y + 2) screen.line_rel(3, 0)
+                    screen.stroke()
+                end
             else
-                -- Deep strata: offset points generate jaggedness based on depth index
+                -- Deep strata: offset points generate jaggedness based on depth index (increasingly rocky)
                 for x = 10, 118, 4 do
                     local offset = (x % (3 * i)) == 0 and (math.floor(i * 0.5)) or 0
                     screen.move(x, y + 3 + offset)
@@ -169,10 +189,9 @@ function redraw()
                 end
             end
 
-            -- Real-time scrolling vertical playhead rendering synced from SuperCollider
+            -- Real-time scrolling playhead dot synced from SuperCollider
             local p = layer_phases[i] or 0.0
             screen.level(math.floor(math.max(4, 16 - (i * 2))))
-            -- BUG FIX: Playhead rendered as a dot
             screen.rect(10 + (p * 108), y + 2, 2, 2)
             screen.fill()
         else
@@ -187,8 +206,7 @@ function redraw()
     -- Footer Layout
     screen.level(3)
     screen.move(0, 62)
-    local env_label = envs.list[params:get("environment")]
-    screen.text(env_label .. " | W:" .. math.floor(params:get("weather") * 100) .. "% P:" .. math.floor(params:get("pressure") * 100) .. "%")
+    screen.text(current_env .. " | W:" .. math.floor(params:get("weather") * 100) .. "% P:" .. math.floor(params:get("pressure") * 100) .. "%")
 
     screen.update()
 end
