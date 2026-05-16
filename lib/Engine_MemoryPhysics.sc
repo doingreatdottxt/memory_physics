@@ -66,7 +66,16 @@ Engine_MemoryPhysics : CroneEngine {
 
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            noise = Select.ar(env % 3, [BrownNoise.ar(0.08), Dust.ar(12) * 0.4, PinkNoise.ar(0.08)]) * layer_weather;
+            // COMPLIANCE FIX: Extended array selection index bounds to scale across all 7 environmental biomes cleanly
+            noise = Select.ar(env % 7, [
+                BrownNoise.ar(0.08), // Grove
+                PinkNoise.ar(0.12),   // Sand
+                WhiteNoise.ar(0.04),  // Mountain
+                PinkNoise.ar(0.06),   // River Bank
+                WhiteNoise.ar(0.1),   // Sea
+                BrownNoise.ar(0.15),  // Swamp
+                PinkNoise.ar(0.03)    // Cave
+            ]) * layer_weather;
             sig = sig + noise;
 
             // --- PRESSURE DEGRADATION ENGINE ---
@@ -120,6 +129,11 @@ Engine_MemoryPhysics : CroneEngine {
             });
             durations[0] = 5.0;
             context.server.sendMsg("/c_set", durBus.index, 5.0);
+        });
+
+        // COMPLIANCE FIX: Added explicit clear_layers command to prevent orphaned buffer playback during Excavation
+        this.addCommand(\clear_layers, "", {
+            buffers.do({ arg b; b.zero; });
         });
 
         this.addCommand(\set_duration, "if", { arg msg;
