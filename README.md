@@ -1,7 +1,7 @@
-Project Vision - 
+-Project Vision - 
 Last In First Out Looper
 
-Conceptual Framework - 
+-Conceptual Framework - 
 Geological "Stratta" form as loops stack.
 As "Strata" layers are burried they become decreasingly audible. 100% volume at surface layer, 50% volume at layer 2, 20% volume at layer 3. Muted at layer 4,5,and 6.
 Archeological "Excivation" and "Erosion" of the top layer returns previously burried "Strata" to the audible zone, but modified by the pressures they experienced while burried. 
@@ -10,17 +10,42 @@ Pressure effects increase as "Strata" are burried deeper. 0% at surface layer, 1
 "Environment" - Creates rules for audio handling. Each "Environment" contains a unique audio handling that represents the conditions of real world biomes. 
 
 
-Effects and Modulation-
+- Defining "Environment" "Pressure", and "Weather" Effects -
 
-Granular synthesis engine - capable of creating fine grains or chunking and combining layers. Fine blowing grains in sand, pressure squishing the edges of layers together in muddy environments, Cracking layers shifting and recombining from seismic activity.
-White/Pink/Brown noise generator used to add aditional depth to "Environment" "Weather" and "Pressure". eg. undulating white noise coming in and out at regular intervals as waves in the top layer of "Sea", Transient pink noise as soft breezes that build to stiff winds as "Weather" intensity increases, subtle Brown noise representing deep shifting as "Pressure" increases.
-Bi-quad Filter cutoff and resonance - High pass, low pass, band pass, notch, peak
-Bitcrusher
-Reverb 
-Distortion/saturation
-Compressor
-Noise Gate
-Echo
+  "Wind" Spectrum - Pink Noise Generator.  Semi-randonized frequency, length, panning, and intensity relative to effect intensity. each "Wind" should use an Attack Sustain Release envelope with an Attack length of 40%, and a release 15% from the end
+  "Rain" -single return delay effect
+  "Dry" - Moderate band pass and high pass filters 
+  "Damp" - moderate Low Pass and band rejection filter
+  "Cold" - moderate distortion and low end noise gate threshold
+  "Cool" subtle distortion and low end noise gate threshold
+  "Warm" -Subtle time stretching, saturation, and warble
+  "Hot" - moderate time stretching, saturation, and warble
+  "Storm" - subtle Granular dislocation of audio fragments, increases intensity of existing "Weather" effects
+  "Deep" - More substantial low pass filter
+  "Waves"  - White Noise Generator. length, panning, and intensity relative to effect intensity. each "Wave" should use an Attack Sustain Release envelope with an Attack length of 25%, and a release 35% from the end
+  "Chirps" 50ms-150ms pitch shifted grains . Pitch shift 2-4 octaves up from original audio
+
+- Effect modifiers -
+- "Very" - increase 30%
+- 
+
+-"Environment"s-
+
+"Grove" -  Damp, Warm, Chirps
+
+"Sand" - Subtle High Pass filter. 
+
+"Mountain" - 
+
+"River Bank" -  
+
+"Sea" -  
+
+"Swamp" - 
+
+"Cave" - 
+
+
 
 
 Control scheme - 
