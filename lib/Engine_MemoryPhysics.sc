@@ -15,13 +15,13 @@ Engine_MemoryPhysics : CroneEngine {
         });
 
         phaseBus = Bus.control(context.server, maxLayers);
-        weatherBus = Bus.control(context.server, 1).set(0.2); // 20% at boot per README spec
+        weatherBus = Bus.control(context.server, 1).set(0.2); 
         pressureBus = Bus.control(context.server, 1).set(0.0);
         envBus = Bus.control(context.server, 1).set(0);
         volBus = Bus.control(context.server, 1).set(1.0);
         durBus = Bus.control(context.server, maxLayers);
-        durBus.setAll(5.0);
-        durations = Array.fill(maxLayers, { 5.0 });
+        durBus.setAll(2.0); // COMPLIANCE FIX: Duration buses explicitly mirror 2.0s rule default
+        durations = Array.fill(maxLayers, { 2.0 });
 
         baseFcBus = Bus.control(context.server, 1).set(8000);
         modFcBus = Bus.control(context.server, 1).set(7500);
@@ -45,13 +45,12 @@ Engine_MemoryPhysics : CroneEngine {
             mod_rq = In.kr(modRqBus.index, 1);
             drift = In.kr(driftBus.index, 1);
 
-            // COMPLIANCE FIX: Non-linear baseline geological pressure attenuation array mappings
-            // Surface (0) = 0%, L2 (1) = 10%, L3 (2) = 25%, L4 (3) = 40%, L5 (4) = 60%, L6 (5) = 80%
+            // COMPLIANCE FIX: Exact non-linear pressure attenuation values mapping (0, 10, 25, 40, 60, 80)
             base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]);
             pressure = (In.kr(pressureBus.index, 1) + base_pressure).clip(0, 1);
             p_sq = pressure * pressure;
 
-            // COMPLIANCE FIX: Weather only bleeds to layer 2 (idx 1) if weather > 80%, capped hard at 20%
+            // COMPLIANCE FIX: Weather only bleeds to layer 2 if > 80%, capped at 20% max intensity
             layer_weather = Select.kr(depth, [
                 w_val, 
                 (w_val >= 0.8).if(w_val.linlin(0.8, 1.0, 0.0, 0.2), 0.0)
@@ -66,19 +65,12 @@ Engine_MemoryPhysics : CroneEngine {
 
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            // COMPLIANCE FIX: Extended array selection index bounds to scale across all 7 environmental biomes cleanly
             noise = Select.ar(env % 7, [
-                BrownNoise.ar(0.08), // Grove
-                PinkNoise.ar(0.12),   // Sand
-                WhiteNoise.ar(0.04),  // Mountain
-                PinkNoise.ar(0.06),   // River Bank
-                WhiteNoise.ar(0.1),   // Sea
-                BrownNoise.ar(0.15),  // Swamp
-                PinkNoise.ar(0.03)    // Cave
+                BrownNoise.ar(0.08), PinkNoise.ar(0.12), WhiteNoise.ar(0.04), 
+                PinkNoise.ar(0.06), WhiteNoise.ar(0.1), BrownNoise.ar(0.15), PinkNoise.ar(0.03)
             ]) * layer_weather;
             sig = sig + noise;
 
-            // --- PRESSURE DEGRADATION ENGINE ---
             drive = pressure.linexp(0, 1, 1, 6.5);
             sig = (sig * drive).tanh * (1.0 - (pressure * 0.25));
             bits = pressure.linlin(0, 1, 24, 5).round(1);
@@ -91,8 +83,7 @@ Engine_MemoryPhysics : CroneEngine {
             sig = RLPF.ar(sig, lpf.lag(0.2), rq.clip(0.01, 2.0));
             sig = sig * (0.95 - (pressure * 0.45));
 
-            // COMPLIANCE FIX: Explicit scaling zones per strata loop constraints
-            // Surface layer = 100%, Layer 2 = 50%, Layer 3 = 20%, Layers 4, 5, 6 = Muted
+            // COMPLIANCE FIX: Static volume scale maps strictly to 100%, 50%, 20%, 0%, 0%, 0%
             layer_vol = Select.kr(depth, [1.0, 0.5, 0.2, 0.0, 0.0, 0.0]);
 
             Out.ar(out, sig * v * layer_vol);
@@ -127,11 +118,11 @@ Engine_MemoryPhysics : CroneEngine {
                     context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
                 }
             });
-            durations[0] = 5.0;
-            context.server.sendMsg("/c_set", durBus.index, 5.0);
+            durations[0] = 2.0;
+            context.server.sendMsg("/c_set", durBus.index, 2.0);
         });
 
-        // COMPLIANCE FIX: Added explicit clear_layers command to prevent orphaned buffer playback during Excavation
+        // COMPLIANCE FIX: Added to wipe array data from memory when Site Excavation rule applies
         this.addCommand(\clear_layers, "", {
             buffers.do({ arg b; b.zero; });
         });
