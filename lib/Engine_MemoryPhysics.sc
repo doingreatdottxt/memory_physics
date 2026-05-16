@@ -46,17 +46,14 @@ Engine_MemoryPhysics : CroneEngine {
             mod_rq = In.kr(modRqBus.index, 1);
             drift = In.kr(driftBus.index, 1);
 
-            // Total pressure is a combination of global override and layer depth index
             pressure = (In.kr(pressureBus.index, 1) + (depth / (maxLayers - 1))).clip(0, 1);
             p_sq = pressure * pressure;
 
-            // Environmental Weather Erosion: Most intense on top layer, slightly bleeds into layer 2
             layer_weather = Select.kr(depth, [
                 w_val,
                 (w_val >= 0.8).if(w_val * 0.25, 0)
             ] ++ Array.fill(maxLayers - 2, { 0 }));
 
-            // Seismic Cracking: Extreme weather and high pressure cause micro-fractures in loop playback rate
             crackle = Dust.kr(layer_weather.linlin(0, 1, 0, 45) * (pressure + 0.1));
             seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
             
@@ -65,10 +62,8 @@ Engine_MemoryPhysics : CroneEngine {
             phase = Phasor.ar(0, BufRateScale.kr(buf) * rate, 0, duration * BufSampleRate.kr(buf));
             sig = BufRd.ar(2, buf, phase, loop: 1);
             
-            // Send normalized playhead phase value back to Norns via OSC at 15Hz
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            // Atmospheric Weather Noise Generation
             noise = Select.ar(env % 3, [
                 BrownNoise.ar(0.08),
                 Dust.ar(12) * 0.4,
@@ -78,33 +73,32 @@ Engine_MemoryPhysics : CroneEngine {
             sig = sig + noise;
 
             // --- PRESSURE DEGRADATION ENGINE ---
-            // 1. Saturation / Compression (Geological Compaction)
             drive = pressure.linexp(0, 1, 1, 6.5);
             sig = (sig * drive).tanh * (1.0 - (pressure * 0.25));
 
-            // 2. Bitcrushing & Sample-Rate Reduction (Crystallization / Compaction Distortion)
             bits = pressure.linlin(0, 1, 24, 5).round(1);
             target_sr = pressure.linexp(0, 1, 48000, 11025);
             sig = sig.round(0.5 ** bits);
             sig = Latch.ar(sig, Impulse.ar(target_sr));
 
-            // 3. Bi-quad Structural Filtering
             lpf = (base_fc - (p_sq * mod_fc)).clip(35, 20000);
             rq = base_rq + (p_sq * mod_rq);
             sig = RLPF.ar(sig, lpf.lag(0.2), rq.clip(0.01, 2.0));
 
-            // Depth-based attenuation matrix
             sig = sig * (0.95 - (pressure * 0.45)); 
 
+            // Hard constraint: Force absolute silence when volume bus goes to 0
             Out.ar(out, sig * v);
         }).add;
 
+        // Cleaned InputTracker to prevent audio channel pass-through leaks
         SynthDef(\InputTracker, { arg in;
-            SendReply.kr(Impulse.kr(10), '/in_amp', [Amplitude.kr(Mix(In.ar(in, 2)))], 999);
+            var input_signal = In.ar(in, 1); // Track mono pin explicitly
+            SendReply.kr(Impulse.kr(10), '/in_amp', [Amplitude.kr(input_signal)], 999);
         }).add;
 
         SynthDef(\SurfaceRecorder, { arg buf, in;
-            RecordBuf.ar(In.ar(in, 2), buf, recLevel: 1.0, preLevel: 0.0, loop: 0, doneAction: 2);
+            RecordBuf.ar(In.ar(in, 1), buf, recLevel: 1.0, preLevel: 0.0, loop: 0, doneAction: 2);
         }).add;
 
         context.server.sync;
