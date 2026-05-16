@@ -18,7 +18,7 @@ local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 function init()
     setup_params()
 
-    -- FIXED: Reverted to native norns global osc.event handler for stable trigger interception
+    -- Standard global hook matches standard norns firmware behaviors perfectly
     osc.event = function(path, args, from)
         if path == "/in_amp" then
             if params:get("auto_record") == 2 then
@@ -98,7 +98,7 @@ function toggle_formation()
         physics.duration = math.max(0.5, util.time() - physics.start_time)
         engine.record_stop()
         
-        -- Commits safely to the surface layer and pushes previous loops downward
+        -- Safely pushes layers down and cleanly prints to surface loop buffer
         engine.shift_layers(physics.duration)
         physics.layers_active = math.min(physics.max_layers, physics.layers_active + 1)
     end
