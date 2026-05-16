@@ -113,14 +113,15 @@ function redraw()
   for i=1, 6 do
     local y = 14 + (i * 7)
     if i <= physics.layers_active then
-      screen.level(math.max(1, 11 - (i * 1.5)))
+      -- math.floor() forces clean integers for the screen graphics processor to prevent crashing
+      screen.level(math.floor(math.max(1, 11 - (i * 1.5))))
       screen.move(10, y + 3)
       screen.line(118, y + 3)
       screen.stroke()
       
       -- Real-time scrolling vertical playhead rendering synced from SuperCollider
-      local p = layer_phases[i]
-      screen.level(math.max(4, 16 - (i * 2)))
+      local p = layer_phases[i] or 0.0
+      screen.level(math.floor(math.max(4, 16 - (i * 2))))
       screen.move(10 + (p * 108), y - 1)
       screen.line_rel(0, 4)
       screen.stroke()
