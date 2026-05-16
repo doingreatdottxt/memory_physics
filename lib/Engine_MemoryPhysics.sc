@@ -3,7 +3,7 @@ Engine_MemoryPhysics : CroneEngine {
     var <buffers, <synths, <recSynth, <maxLayers = 6;
     var <phaseBus, <weatherBus, <pressureBus, <envBus, <volBus, <durBus;
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
-    var <durations; 
+    var <durations;
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
@@ -15,11 +15,10 @@ Engine_MemoryPhysics : CroneEngine {
         });
 
         phaseBus = Bus.control(context.server, maxLayers);
-        weatherBus = Bus.control(context.server, 1).set(0.2);
+        weatherBus = Bus.control(context.server, 1).set(0.2); // 20% at boot per README spec
         pressureBus = Bus.control(context.server, 1).set(0.0);
         envBus = Bus.control(context.server, 1).set(0);
         volBus = Bus.control(context.server, 1).set(1.0);
-        
         durBus = Bus.control(context.server, maxLayers);
         durBus.setAll(5.0);
         durations = Array.fill(maxLayers, { 5.0 });
@@ -34,48 +33,45 @@ Engine_MemoryPhysics : CroneEngine {
             var sig, pressure, lpf, phase, noise, w_val, env, v, duration;
             var base_fc, mod_fc, base_rq, mod_rq, drift, p_sq, rq, layer_weather, rate;
             var drive, bits, target_sr, crackle, seismic_jitter;
+            var layer_vol, base_pressure;
 
             w_val = In.kr(weatherBus.index, 1);
             v = In.kr(volBus.index, 1);
             env = In.kr(envBus.index, 1);
             duration = In.kr(durBus.index + dur_idx, 1);
-
             base_fc = In.kr(baseFcBus.index, 1);
             mod_fc = In.kr(modFcBus.index, 1);
             base_rq = In.kr(baseRqBus.index, 1);
             mod_rq = In.kr(modRqBus.index, 1);
             drift = In.kr(driftBus.index, 1);
 
-            pressure = (In.kr(pressureBus.index, 1) + (depth / (maxLayers - 1))).clip(0, 1);
+            // COMPLIANCE FIX: Non-linear baseline geological pressure attenuation array mappings
+            // Surface (0) = 0%, L2 (1) = 10%, L3 (2) = 25%, L4 (3) = 40%, L5 (4) = 60%, L6 (5) = 80%
+            base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]);
+            pressure = (In.kr(pressureBus.index, 1) + base_pressure).clip(0, 1);
             p_sq = pressure * pressure;
 
+            // COMPLIANCE FIX: Weather only bleeds to layer 2 (idx 1) if weather > 80%, capped hard at 20%
             layer_weather = Select.kr(depth, [
-                w_val,
-                (w_val >= 0.8).if(w_val * 0.25, 0)
-            ] ++ Array.fill(maxLayers - 2, { 0 }));
+                w_val, 
+                (w_val >= 0.8).if(w_val.linlin(0.8, 1.0, 0.0, 0.2), 0.0)
+            ] ++ Array.fill(maxLayers - 2, { 0.0 }));
 
             crackle = Dust.kr(layer_weather.linlin(0, 1, 0, 45) * (pressure + 0.1));
             seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
-            
             rate = 1.0 + (SinOsc.kr(drift * 25) * (layer_weather * drift)) + seismic_jitter;
 
             phase = Phasor.ar(0, BufRateScale.kr(buf) * rate, 0, duration * BufSampleRate.kr(buf));
             sig = BufRd.ar(2, buf, phase, loop: 1);
-            
+
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            noise = Select.ar(env % 3, [
-                BrownNoise.ar(0.08),
-                Dust.ar(12) * 0.4,
-                PinkNoise.ar(0.08)
-            ]) * layer_weather;
-
+            noise = Select.ar(env % 3, [BrownNoise.ar(0.08), Dust.ar(12) * 0.4, PinkNoise.ar(0.08)]) * layer_weather;
             sig = sig + noise;
 
             // --- PRESSURE DEGRADATION ENGINE ---
             drive = pressure.linexp(0, 1, 1, 6.5);
             sig = (sig * drive).tanh * (1.0 - (pressure * 0.25));
-
             bits = pressure.linlin(0, 1, 24, 5).round(1);
             target_sr = pressure.linexp(0, 1, 48000, 11025);
             sig = sig.round(0.5 ** bits);
@@ -84,16 +80,17 @@ Engine_MemoryPhysics : CroneEngine {
             lpf = (base_fc - (p_sq * mod_fc)).clip(35, 20000);
             rq = base_rq + (p_sq * mod_rq);
             sig = RLPF.ar(sig, lpf.lag(0.2), rq.clip(0.01, 2.0));
+            sig = sig * (0.95 - (pressure * 0.45));
 
-            sig = sig * (0.95 - (pressure * 0.45)); 
+            // COMPLIANCE FIX: Explicit scaling zones per strata loop constraints
+            // Surface layer = 100%, Layer 2 = 50%, Layer 3 = 20%, Layers 4, 5, 6 = Muted
+            layer_vol = Select.kr(depth, [1.0, 0.5, 0.2, 0.0, 0.0, 0.0]);
 
-            // Hard constraint: Force absolute silence when volume bus goes to 0
-            Out.ar(out, sig * v);
+            Out.ar(out, sig * v * layer_vol);
         }).add;
 
-        // Cleaned InputTracker to prevent audio channel pass-through leaks
         SynthDef(\InputTracker, { arg in;
-            var input_signal = In.ar(in, 1); // Track mono pin explicitly
+            var input_signal = In.ar(in, 1);
             SendReply.kr(Impulse.kr(10), '/in_amp', [Amplitude.kr(input_signal)], 999);
         }).add;
 
@@ -114,7 +111,7 @@ Engine_MemoryPhysics : CroneEngine {
                 if(i > 0) { buffers[i].copyData(buffers[i - 1]); }
             });
             buffers[0].zero;
-
+            
             (maxLayers - 1).reverseDo({ arg i;
                 if(i > 0) {
                     durations[i] = durations[i - 1];
@@ -142,7 +139,7 @@ Engine_MemoryPhysics : CroneEngine {
         this.addCommand(\set_pressure, "f", { arg msg; pressureBus.set(msg[1]); });
         this.addCommand(\set_env, "i", { arg msg; envBus.set(msg[1]); });
         this.addCommand(\set_volume, "f", { arg msg; volBus.set(msg[1]); });
-
+        
         this.addCommand(\set_environment_params, "fffff", { arg msg;
             baseFcBus.set(msg[1]);
             modFcBus.set(msg[2]);
