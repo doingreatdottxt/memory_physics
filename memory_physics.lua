@@ -10,7 +10,10 @@ local physics = {
     layers_active = 0,
     max_layers = 6,
     shift_held = false,
-    silence_frames = 0
+    silence_frames = 0,
+    -- COMPLIANCE FIX: Added state parameters to track active surface loop cycles
+    surface_cycles = 0,
+    last_surface_phase = 0.0
 }
 
 local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
@@ -21,7 +24,6 @@ function init()
     osc.event = function(path, args, from)
         if path == "/in_amp" then
             if params:get("auto_record") == 2 then
-                -- BUG FIX: Correctly maps incoming single value directly from the engine forwarder index
                 local amp = args[1]
                 if not physics.recording and amp > params:get("threshold") then
                     toggle_formation()
@@ -40,8 +42,22 @@ function init()
         elseif path == "/layer_phase" then
             local layer_idx = math.floor(args[1] + 1)
             local phase_val = args[2]
+            
             if layer_idx >= 1 and layer_idx <= physics.max_layers then
                 layer_phases[layer_idx] = phase_val
+                
+                -- COMPLIANCE FIX: Track surface loop (Layer 1) phase resets to identify cycle completions
+                if layer_idx == 1 and physics.layers_active > 0 and not physics.recording then
+                    if phase_val < physics.last_surface_phase and physics.last_surface_phase > 0.88 then
+                        physics.surface_cycles = physics.surface_cycles + 1
+                        if physics.surface_cycles >= 5 then
+                            engine.erode_layer()
+                            physics.layers_active = math.max(0, physics.layers_active - 1)
+                            physics.surface_cycles = 0
+                        end
+                    end
+                    physics.last_surface_phase = phase_val
+                end
             end
         end
     end
@@ -80,6 +96,7 @@ function setup_params()
     params:add_trigger("excavate", "EXCAVATE SITE")
     params:set_action("excavate", function()
         physics.layers_active = 0
+        physics.surface_cycles = 0
         if engine.clear_layers then
             engine.clear_layers()
         end
@@ -90,6 +107,10 @@ end
 
 function toggle_formation()
     if not physics.recording then
+        -- Clean cycle registers to guarantee new surface loops receive a full 5 cycles
+        physics.surface_cycles = 0
+        physics.last_surface_phase = 0.0
+        
         physics.start_time = util.time()
         engine.record_start()
         physics.recording = true
@@ -114,10 +135,10 @@ function key(n, z)
         end
     elseif n == 3 and z == 1 then
         if physics.shift_held then
-            -- BUG FIX: Shift+Key 3 scales visual tracking counter down dynamically alongside erosion events
             if physics.layers_active > 0 then
                 engine.erode_layer()
                 physics.layers_active = physics.layers_active - 1
+                physics.surface_cycles = 0
             end
         else
             params:set("auto_record", params:get("auto_record") == 1 and 2 or 1)
@@ -141,7 +162,8 @@ function redraw()
     screen.level(physics.recording and 15 or 3)
     screen.move(0, 8)
     local status = physics.recording and "FORMING STRATA" or "STABLE"
-    screen.text(status .. " [" .. string.format("%.1f", physics.duration) .. "s]")
+    -- Modified header to display live cycle monitoring data
+    screen.text(status .. " [" .. string.format("%.1f", physics.duration) .. "s] C:" .. physics.surface_cycles .. "/5")
 
     local current_env = envs.list[params:get("environment")]
     for i = 1, 6 do
