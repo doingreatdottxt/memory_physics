@@ -95,7 +95,7 @@ function setup_params()
   params:add_control("threshold", "AUTO THRESHOLD", controlspec.new(0.001, 1.0, 'exp', 0.001, 0.05))
   params:add_control("release_time", "AUTO TIMEOUT RELEASE (S)", controlspec.new(0.1, 5.0, 'lin', 0.1, 2.0))
   
-  -- Rebuilt Quantization UI parameters
+  -- Quantization configuration parameters
   params:add_option("quant_mode", "QUANTIZATION STYLE", {"FREE", "CLOCK FOLLOW", "BAR MODE"}, 1)
   params:add_control("bar_length", "BAR SYSTEM BEDROCK", controlspec.new(0.1, MAX_TIME, 'lin', 0.01, 2.0, "s"))
   params:hide("bar_length")
@@ -186,7 +186,6 @@ function toggle_formation()
     state.recording = false
     local measured_dur = util.time() - state.start_time
     
-    -- Extract calculated value from structural quantization pipeline
     state.duration = calculate_quantized_duration(measured_dur)
     
     engine.record_stop()
