@@ -4,7 +4,7 @@ Engine_MemoryPhysics : CroneEngine {
     var <recBuffer; 
     var <phaseBus, <envIntBus, <weatherBus, <pressureBus, <envBus, <volBus, <durBus;
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
-    var <durations;
+    var <durations, <synthDepths;
     
     var <fxBus, <fxSynth, <monitorSynth, <bgSynth, <chirpSynth;
     var <ampForwarder, <phaseForwarder, <luaAddr;
@@ -30,9 +30,13 @@ Engine_MemoryPhysics : CroneEngine {
         pressureBus = Bus.control(context.server, 1).set(0.0);
         envBus = Bus.control(context.server, 1).set(0);
         volBus = Bus.control(context.server, 1).set(1.0);
+        
         durBus = Bus.control(context.server, maxLayers);
         durBus.setAll(2.0);
         durations = Array.fill(maxLayers, { 2.0 });
+        
+        // Tracks the logical depth of each synth so we can crossfade them in place
+        synthDepths = Array.fill(maxLayers, { arg i; i });
 
         baseFcBus = Bus.control(context.server, 1).set(8000);
         modFcBus = Bus.control(context.server, 1).set(7500);
@@ -173,8 +177,13 @@ Engine_MemoryPhysics : CroneEngine {
             feedback = w_val.linlin(0, 1, 0.10, 0.78);
             localIn = LocalIn.ar(2) * feedback;
             mod = LFDNoise3.kr(w_val.linlin(0, 1, 0.2, 2.5)).range(0.96, 1.04);
+            
             wetSig = DelayC.ar(sig + localIn, 2.0, (delayTime * mod).clip(0.01, 2.0));
             wetSig = HPF.ar(LPF.ar(wetSig, 3800), 100);
+            
+            // SAFETY: Hard limiter and DC blocker on the delay line feedback to prevent infinite blowups
+            wetSig = LeakDC.ar(wetSig);
+            wetSig = Limiter.ar(wetSig, 0.95, 0.02);
             LocalOut.ar(wetSig);
 
             sig = Select.ar(Select.kr(env_idx % 7, [1, 0, 0, 1, 0, 1, 1]), [
@@ -197,7 +206,10 @@ Engine_MemoryPhysics : CroneEngine {
             crushSig = Latch.ar(sig.round(0.5 ** bits), Impulse.ar(target_sr));
             sig = SelectX.ar(p_val > 0, [sig, crushSig]);
 
-            Out.ar(out, sig * In.kr(volBus.index, 1));
+            // SAFETY: Final master stage hard limiter to protect hardware and ears
+            sig = Limiter.ar(sig * In.kr(volBus.index, 1), 0.98, 0.01);
+            
+            Out.ar(out, sig);
         }).add;
 
         // 4. LIVE INPUT MONITOR
@@ -207,12 +219,13 @@ Engine_MemoryPhysics : CroneEngine {
         }).add;
 
         // 5. LAYER PLAYBACK ENGINE
-        SynthDef(\StrataLayer, { arg buf, out, depth=0, phase_out, dur_idx;
+        SynthDef(\StrataLayer, { arg buf, out, depth=0, dur_idx;
             var sig, phase, duration, rate, layer_vol;
             var drift, layer_weather, crackle, seismic_jitter;
             var w_val, w_gate, env_idx, p_override, base_pressure, pressure;
             var base_fc, mod_fc, base_rq, mod_rq, lpf, rq, p_sq;
             var drive, bits, target_sr, crushSig, driveSig;
+            var fade_time = 4.0;
 
             w_val = In.kr(weatherBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
@@ -225,7 +238,8 @@ Engine_MemoryPhysics : CroneEngine {
             base_rq = In.kr(baseRqBus.index, 1);
             mod_rq = In.kr(modRqBus.index, 1);
 
-            base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]);
+            // Crossfade target arrays lagging gracefully over 4 seconds dynamically
+            base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]).lag(fade_time);
             pressure = (p_override + base_pressure).clip(0, 1);
             p_sq = pressure * pressure;
 
@@ -233,7 +247,7 @@ Engine_MemoryPhysics : CroneEngine {
             layer_weather = Select.kr(depth, [
                 w_val, 
                 w_gate * w_val.linlin(0.8, 1.0, 0.0, 0.2)
-            ] ++ Array.fill(maxLayers - 2, { 0.0 }));
+            ] ++ Array.fill(maxLayers - 2, { 0.0 })).lag(fade_time);
 
             crackle = Dust.kr(layer_weather.linlin(0, 1, 0, 45));
             seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
@@ -242,6 +256,7 @@ Engine_MemoryPhysics : CroneEngine {
             phase = Phasor.ar(0, BufRateScale.kr(buf) * rate, 0, duration * BufSampleRate.kr(buf));
             sig = BufRd.ar(2, buf, phase, loop: 1);
 
+            // depth represents our logical UI layer so we pass it straight through untouched by lag
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
             drive = Select.kr(env_idx % 7, [1.2, 3.5, 5.0, 1.0, 1.1, 1.5, 1.0]) * pressure.linexp(0, 1, 1, 4);
@@ -255,9 +270,14 @@ Engine_MemoryPhysics : CroneEngine {
 
             lpf = (base_fc - (p_sq * mod_fc)).clip(40, 19500);
             rq = base_rq + (p_sq * mod_rq);
-            sig = RLPF.ar(sig, lpf.lag(0.3), rq.clip(0.04, 2.0));
+            
+            // SAFETY: Increase minimum Q clip limit (0.04 -> 0.1) to prevent hyper-resonance filter squeals
+            sig = RLPF.ar(sig, lpf.lag(0.3), rq.clip(0.1, 2.0));
 
-            layer_vol = Select.kr(depth, [1.0, 0.5, 0.2, 0.0, 0.0, 0.0]);
+            // SAFETY: Block DC offset buildup from heavy drive / squashed layers
+            sig = LeakDC.ar(sig);
+
+            layer_vol = Select.kr(depth, [1.0, 0.5, 0.2, 0.0, 0.0, 0.0]).lag(fade_time);
             Out.ar(out, sig * layer_vol);
         }).add;
 
@@ -288,33 +308,48 @@ Engine_MemoryPhysics : CroneEngine {
 
         this.addCommand(\shift_layers, "f", { arg msg;
             var new_dur = msg[1];
+            var newLayer0SynthIndex;
             
-            (maxLayers - 2).reverseDo({ arg i;
-                buffers[i].copyData(buffers[i + 1]);
-                durations[i + 1] = durations[i];
-                context.server.sendMsg("/c_set", durBus.index + i + 1, durations[i + 1]);
+            // Cycle the logical depth index instead of hard copying buffer memory
+            synthDepths = synthDepths.collect({ arg d; (d + 1) % maxLayers });
+            newLayer0SynthIndex = synthDepths.indexOf(0);
+            
+            // Push the physical recBuffer straight into the newly designated Layer 0 buffer
+            recBuffer.copyData(buffers[newLayer0SynthIndex]);
+            durations[newLayer0SynthIndex] = new_dur;
+            context.server.sendMsg("/c_set", durBus.index + newLayer0SynthIndex, new_dur);
+            
+            // Tell the synths their new depths so they naturally lag crossfade to them
+            synths.do({ arg syn, i;
+                syn.set(\depth, synthDepths[i]);
             });
-            
-            recBuffer.copyData(buffers[0]);
-            durations[0] = new_dur;
-            context.server.sendMsg("/c_set", durBus.index, new_dur);
         });
 
         this.addCommand(\erode_layer, "", {
-            (maxLayers - 1).do({ arg i;
-                buffers[i + 1].copyData(buffers[i]);
-                durations[i] = durations[i + 1];
-                context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
-            });
+            var newLayer5SynthIndex;
             
-            buffers[maxLayers - 1].zero;
-            durations[maxLayers - 1] = 2.0;
-            context.server.sendMsg("/c_set", durBus.index + (maxLayers - 1), 2.0);
+            // Shift Logical Depth back up
+            synthDepths = synthDepths.collect({ arg d; (d - 1).wrap(0, maxLayers - 1) });
+            newLayer5SynthIndex = synthDepths.indexOf(maxLayers - 1);
+            
+            buffers[newLayer5SynthIndex].zero;
+            durations[newLayer5SynthIndex] = 2.0;
+            context.server.sendMsg("/c_set", durBus.index + newLayer5SynthIndex, 2.0);
+            
+            synths.do({ arg syn, i;
+                syn.set(\depth, synthDepths[i]);
+            });
         });
 
         this.addCommand(\clear_layers, "", {
             buffers.do({ arg b; b.zero; });
             recBuffer.zero;
+            
+            // Wipe clean and reset logical depths
+            synthDepths = Array.fill(maxLayers, {arg i; i});
+            synths.do({ arg syn, i;
+                syn.set(\depth, synthDepths[i]);
+            });
         });
 
         this.addCommand(\set_duration, "if", { arg msg;
