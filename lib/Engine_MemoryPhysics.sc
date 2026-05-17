@@ -35,7 +35,6 @@ Engine_MemoryPhysics : CroneEngine {
         durBus.setAll(2.0);
         durations = Array.fill(maxLayers, { 2.0 });
         
-        // Tracks the logical depth of each synth so we can crossfade them in place
         synthDepths = Array.fill(maxLayers, { arg i; i });
 
         baseFcBus = Bus.control(context.server, 1).set(8000);
@@ -52,7 +51,7 @@ Engine_MemoryPhysics : CroneEngine {
             luaAddr.sendMsg('/layer_phase', msg[3], msg[4]);
         }, '/layer_phase', context.server.addr).fix;
 
-        // 1. GENERATIVE ENVIRONMENTAL BACKGROUND AMBIENCE SYNTH
+        -- 1. GENERATIVE ENVIRONMENTAL BACKGROUND AMBIENCE SYNTH
         SynthDef(\EnvBackground, { arg out;
             var e_val, env_idx, noise, breeze, wind, waves;
             var b_trig, b_dur, b_env, b_freq, b_pan, b_amp;
@@ -108,11 +107,10 @@ Engine_MemoryPhysics : CroneEngine {
             Out.ar(out, noise);
         }).add;
 
-        // 2. GENERATIVE ENVIRONMENTAL MICRO-CHIRP SYNTH PIPELINE
+        -- 2. GENERATIVE ENVIRONMENTAL MICRO-CHIRP SYNTH PIPELINE
         SynthDef(\EnvChirps, { arg out;
             var e_val, p_val, env_idx, sig;
             var grove_trig, grove_env, grove_freq, grove_sig;
-            var sand_trig, sand_env, sand_sig;
             var cave_trig, cave_env, cave_freq, cave_sig;
             var swamp_pulse, swamp_trig, swamp_gate, swamp_env, swamp_sig;
 
@@ -120,27 +118,21 @@ Engine_MemoryPhysics : CroneEngine {
             p_val = In.kr(pressureBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
 
-            // --- GROVE / RIVER BANK ---
+            -- Biological Avian/Insect Trills (Grove & River Bank)
             grove_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 0.75) * (1.0 - (p_val * 0.6)));
             grove_env = EnvGen.ar(Env.perc(0.005, TRand.kr(0.03, 0.12, grove_trig)), grove_trig);
             grove_freq = TExpRand.kr(1600, 3800, grove_trig) + (grove_env * TRand.kr(400, 1200, grove_trig));
             grove_sig = SinOsc.ar(grove_freq * (1.0 - (p_val * 0.25))) * grove_env * e_val.linlin(0.01, 1, 0.0, 0.12);
             grove_sig = Pan2.ar(grove_sig, TRand.kr(-0.6, 0.6, grove_trig));
 
-            // --- SAND / SEA ---
-            sand_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 3.5));
-            sand_env = EnvGen.ar(Env.perc(0.001, TRand.kr(0.005, 0.025, sand_trig)), sand_trig);
-            sand_sig = BPF.ar(WhiteNoise.ar(), TExpRand.kr(4000, 9500, sand_trig), 0.15) * sand_env * e_val.linlin(0.01, 1, 0.0, 0.18);
-            sand_sig = Pan2.ar(sand_sig, TRand.kr(-0.8, 0.8, sand_trig));
-
-            // --- MOUNTAIN / CAVE ---
+            -- Resonant Cavern Crystal Pings / Fractures (Cave)
             cave_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 0.28));
             cave_env = EnvGen.ar(Env.perc(0.002, 0.35, 1.0, -6), cave_trig);
             cave_freq = TExpRand.kr(900, 2600, cave_trig) * (1.0 - (p_val * 0.3));
             cave_sig = Ringz.ar(PinkNoise.ar(0.004) * cave_env, cave_freq, TRand.kr(0.08, 0.3, cave_trig)) * cave_env * 0.35;
             cave_sig = Pan2.ar(cave_sig, TRand.kr(-0.5, 0.5, cave_trig));
 
-            // --- SWAMP ---
+            -- Amphibious Rhythmic Croaks (Swamp)
             swamp_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 0.65) * (1.0 - (p_val * 0.4)));
             swamp_pulse = Impulse.kr(TRand.kr(6, 24, swamp_trig));
             swamp_gate = EnvGen.kr(Env.perc(0.04, 0.28), swamp_trig);
@@ -148,20 +140,21 @@ Engine_MemoryPhysics : CroneEngine {
             swamp_sig = LPF.ar(Saw.ar(TRand.kr(70, 190, swamp_trig) * (1.0 - (p_val * 0.15))), 750) * swamp_env * e_val.linlin(0.01, 1, 0.0, 0.22);
             swamp_sig = Pan2.ar(swamp_sig, TRand.kr(-0.3, 0.3, swamp_trig));
 
+            -- COMPLIANCE FIX: Decoupled and muted all Chirps inside Sand, Mountain, and Sea slots
             sig = Select.ar(env_idx % 7, [
-                grove_sig,   
-                sand_sig,    
-                cave_sig,    
-                grove_sig,   
-                sand_sig,    
-                swamp_sig,   
-                cave_sig     
+                grove_sig,     -- 0: Grove
+                Silent.ar(2),  -- 1: Sand
+                Silent.ar(2),  -- 2: Mountain
+                grove_sig,     -- 3: River Bank
+                Silent.ar(2),  -- 4: Sea
+                swamp_sig,     -- 5: Swamp
+                cave_sig       -- 6: Cave
             ]);
 
             Out.ar(out, sig);
         }).add;
 
-        // 3. MASTER SITE EFFECTS SYNTH PIPELINE
+        -- 3. MASTER SITE EFFECTS SYNTH PIPELINE
         SynthDef(\MasterFX, { arg in, out;
             var sig, w_val, p_val, env_idx;
             var localIn, wetSig, delayTime, feedback, mod;
@@ -181,7 +174,6 @@ Engine_MemoryPhysics : CroneEngine {
             wetSig = DelayC.ar(sig + localIn, 2.0, (delayTime * mod).clip(0.01, 2.0));
             wetSig = HPF.ar(LPF.ar(wetSig, 3800), 100);
             
-            // SAFETY: Hard limiter and DC blocker on the delay line feedback to prevent infinite blowups
             wetSig = LeakDC.ar(wetSig);
             wetSig = Limiter.ar(wetSig, 0.95, 0.02);
             LocalOut.ar(wetSig);
@@ -201,24 +193,22 @@ Engine_MemoryPhysics : CroneEngine {
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = XFade2.ar(sig, driveSig, p_val.linlin(0, 1, -0.4, 1.0));
 
-            // ORGANIC MASTER DEGRADATION: Replace bitcrusher with Tape-Style Compression
             compThresh = p_val.linlin(0, 1, 0.9, 0.3);
             compSig = Compander.ar(sig, sig, thresh: compThresh, slopeBelow: 1.0, slopeAbove: 0.35, clampTime: 0.01, relaxTime: 0.15);
-            sig = SelectX.ar(p_val, [sig, compSig * 1.3]); // Smooth crossfade into thicker compression
+            sig = SelectX.ar(p_val, [sig, compSig * 1.3]); 
             
-            // SAFETY: Final master stage hard limiter to protect hardware and ears
             sig = Limiter.ar(sig * In.kr(volBus.index, 1), 0.98, 0.01);
             
             Out.ar(out, sig);
         }).add;
 
-        // 4. LIVE INPUT MONITOR
+        -- 4. LIVE INPUT MONITOR
         SynthDef(\InputMonitor, { arg in, out;
             var sig = In.ar(in, 2);
             Out.ar(out, sig);
         }).add;
 
-        // 5. LAYER PLAYBACK ENGINE
+        -- 5. LAYER PLAYBACK ENGINE
         SynthDef(\StrataLayer, { arg buf, out, depth=0, dur_idx;
             var sig, phase, duration, rate, layer_vol;
             var drift, layer_weather, crackle, seismic_jitter;
@@ -239,7 +229,6 @@ Engine_MemoryPhysics : CroneEngine {
             base_rq = In.kr(baseRqBus.index, 1);
             mod_rq = In.kr(modRqBus.index, 1);
 
-            // Crossfade target arrays lagging gracefully over 4 seconds dynamically
             base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]).lag(fade_time);
             pressure = (p_override + base_pressure).clip(0, 1);
             p_sq = pressure * pressure;
@@ -257,26 +246,21 @@ Engine_MemoryPhysics : CroneEngine {
             phase = Phasor.ar(0, BufRateScale.kr(buf) * rate, 0, duration * BufSampleRate.kr(buf));
             sig = BufRd.ar(2, buf, phase, loop: 1);
 
-            // depth represents our logical UI layer so we pass it straight through untouched by lag
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
             drive = Select.kr(env_idx % 7, [1.2, 3.5, 5.0, 1.0, 1.1, 1.5, 1.0]) * pressure.linexp(0, 1, 1, 4);
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = SelectX.ar(pressure > 0, [sig, driveSig]);
 
-            // ORGANIC PRESSURE DEGRADATION: Replace sweeping bitcrush with Wow/Flutter Tape Modulation
             wobbleRate = pressure.linlin(0, 1, 0.1, 5.0);
-            wobbleDepth = pressure.linlin(0, 1, 0.0, 0.008); // Max 8ms of tape stretch
+            wobbleDepth = pressure.linlin(0, 1, 0.0, 0.008); 
             wobble = LFDNoise3.ar(wobbleRate, wobbleDepth);
             sig = DelayC.ar(sig, 0.02, 0.01 + wobble);
 
             lpf = (base_fc - (p_sq * mod_fc)).clip(40, 19500);
             rq = base_rq + (p_sq * mod_rq);
             
-            // SAFETY: Increase minimum Q clip limit (0.04 -> 0.1) to prevent hyper-resonance filter squeals
             sig = RLPF.ar(sig, lpf.lag(0.3), rq.clip(0.1, 2.0));
-
-            // SAFETY: Block DC offset buildup from heavy drive / squashed layers
             sig = LeakDC.ar(sig);
 
             layer_vol = Select.kr(depth, [1.0, 0.5, 0.2, 0.0, 0.0, 0.0]).lag(fade_time);
@@ -312,16 +296,13 @@ Engine_MemoryPhysics : CroneEngine {
             var new_dur = msg[1];
             var newLayer0SynthIndex;
             
-            // Cycle the logical depth index instead of hard copying buffer memory
             synthDepths = synthDepths.collect({ arg d; (d + 1) % maxLayers });
             newLayer0SynthIndex = synthDepths.indexOf(0);
             
-            // Push the physical recBuffer straight into the newly designated Layer 0 buffer
             recBuffer.copyData(buffers[newLayer0SynthIndex]);
             durations[newLayer0SynthIndex] = new_dur;
             context.server.sendMsg("/c_set", durBus.index + newLayer0SynthIndex, new_dur);
             
-            // Tell the synths their new depths so they naturally lag crossfade to them
             synths.do({ arg syn, i;
                 syn.set(\depth, synthDepths[i]);
             });
@@ -330,7 +311,6 @@ Engine_MemoryPhysics : CroneEngine {
         this.addCommand(\erode_layer, "", {
             var newLayer5SynthIndex;
             
-            // Shift Logical Depth back up
             synthDepths = synthDepths.collect({ arg d; (d - 1).wrap(0, maxLayers - 1) });
             newLayer5SynthIndex = synthDepths.indexOf(maxLayers - 1);
             
@@ -347,7 +327,6 @@ Engine_MemoryPhysics : CroneEngine {
             buffers.do({ arg b; b.zero; });
             recBuffer.zero;
             
-            // Wipe clean and reset logical depths
             synthDepths = Array.fill(maxLayers, {arg i; i});
             synths.do({ arg syn, i;
                 syn.set(\depth, synthDepths[i]);
