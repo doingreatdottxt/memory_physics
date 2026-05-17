@@ -166,7 +166,7 @@ Engine_MemoryPhysics : CroneEngine {
             var sig, w_val, p_val, env_idx;
             var localIn, wetSig, delayTime, feedback, mod;
             var d_lpf, d_hpf, baseDrive, drive, driveSig;
-            var bits, target_sr, crushSig;
+            var compThresh, compSig;
 
             sig = In.ar(in, 2);
             w_val = In.kr(weatherBus.index, 1);
@@ -201,11 +201,11 @@ Engine_MemoryPhysics : CroneEngine {
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = XFade2.ar(sig, driveSig, p_val.linlin(0, 1, -0.4, 1.0));
 
-            bits = p_val.linlin(0, 1, 24, 6).round(1);
-            target_sr = p_val.linexp(0.001, 1, 48000, 11025);
-            crushSig = Latch.ar(sig.round(0.5 ** bits), Impulse.ar(target_sr));
-            sig = SelectX.ar(p_val > 0, [sig, crushSig]);
-
+            // ORGANIC MASTER DEGRADATION: Replace bitcrusher with Tape-Style Compression
+            compThresh = p_val.linlin(0, 1, 0.9, 0.3);
+            compSig = Compander.ar(sig, sig, thresh: compThresh, slopeBelow: 1.0, slopeAbove: 0.35, clampTime: 0.01, relaxTime: 0.15);
+            sig = SelectX.ar(p_val, [sig, compSig * 1.3]); // Smooth crossfade into thicker compression
+            
             // SAFETY: Final master stage hard limiter to protect hardware and ears
             sig = Limiter.ar(sig * In.kr(volBus.index, 1), 0.98, 0.01);
             
@@ -224,7 +224,8 @@ Engine_MemoryPhysics : CroneEngine {
             var drift, layer_weather, crackle, seismic_jitter;
             var w_val, w_gate, env_idx, p_override, base_pressure, pressure;
             var base_fc, mod_fc, base_rq, mod_rq, lpf, rq, p_sq;
-            var drive, bits, target_sr, crushSig, driveSig;
+            var drive, driveSig;
+            var wobbleRate, wobbleDepth, wobble;
             var fade_time = 4.0;
 
             w_val = In.kr(weatherBus.index, 1);
@@ -263,10 +264,11 @@ Engine_MemoryPhysics : CroneEngine {
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = SelectX.ar(pressure > 0, [sig, driveSig]);
 
-            bits = pressure.linlin(0, 1, 24, 6).round(1);
-            target_sr = pressure.linexp(0.001, 1, 48000, 12000);
-            crushSig = Latch.ar(sig.round(0.5 ** bits), Impulse.ar(target_sr));
-            sig = SelectX.ar(pressure > 0, [sig, crushSig]);
+            // ORGANIC PRESSURE DEGRADATION: Replace sweeping bitcrush with Wow/Flutter Tape Modulation
+            wobbleRate = pressure.linlin(0, 1, 0.1, 5.0);
+            wobbleDepth = pressure.linlin(0, 1, 0.0, 0.008); // Max 8ms of tape stretch
+            wobble = LFDNoise3.ar(wobbleRate, wobbleDepth);
+            sig = DelayC.ar(sig, 0.02, 0.01 + wobble);
 
             lpf = (base_fc - (p_sq * mod_fc)).clip(40, 19500);
             rq = base_rq + (p_sq * mod_rq);
