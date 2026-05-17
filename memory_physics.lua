@@ -22,7 +22,8 @@ local physics = {
     shift_held = false,
     silence_frames = 0,
     surface_cycles = 0,
-    last_surface_phase = 0.0
+    last_surface_phase = 0.0,
+    cycle_armed = false -- FIX: Latch state to track real loop boundaries cleanly
 }
 
 local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
@@ -30,7 +31,6 @@ local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 function init()
     setup_params()
 
-    -- Incoming hardware OSC event router
     osc.event = function(path, args, from)
         if path == "/in_amp" then
             if params:get("auto_record") == 2 then
@@ -56,10 +56,14 @@ function init()
             if layer_idx >= 1 and layer_idx <= physics.max_layers then
                 layer_phases[layer_idx] = phase_val
                 
-                -- Loop Cycle Monitor Decoder: Tracks 5 surface loops before eroding
+                -- FIX: Schmitt-Trigger loop cycle tracker prevents multi-triggering or jitter jumps
                 if layer_idx == 1 and physics.layers_active > 0 and not physics.recording then
-                    if phase_val < physics.last_surface_phase and physics.last_surface_phase > 0.88 then
+                    if phase_val > 0.75 then
+                        physics.cycle_armed = true
+                    elseif phase_val < 0.15 and physics.cycle_armed then
+                        physics.cycle_armed = false -- Disarm instantly to prevent double execution
                         physics.surface_cycles = physics.surface_cycles + 1
+                        
                         if physics.surface_cycles >= 5 then
                             engine.erode_layer()
                             physics.layers_active = math.max(0, physics.layers_active - 1)
@@ -97,15 +101,13 @@ function setup_params()
         end
     end)
 
-    -- Mapped to Encoder 1
-    params:add_control("env_intensity", "ENV INTENSITY", controlspec.new(0, 1, 'lin', 0.01, 1.0))
+    -- FIX: Adjusted default controlspec initialization parameter value to 0.5 (50%) on boot
+    params:add_control("env_intensity", "ENV INTENSITY", controlspec.new(0, 1, 'lin', 0.01, 0.5))
     params:set_action("env_intensity", function(x) engine.set_env_intensity(x) end)
 
-    -- Mapped to Encoder 2
     params:add_control("weather", "WEATHER INTENSITY", controlspec.new(0, 1, 'lin', 0.01, 0.2))
     params:set_action("weather", function(x) engine.set_weather(x) end)
 
-    -- Mapped to Encoder 3
     params:add_control("pressure", "PRESSURE OVERRIDE", controlspec.new(0, 1, 'lin', 0.01, 0))
     params:set_action("pressure", function(x) engine.set_pressure(x) end)
 
@@ -113,6 +115,7 @@ function setup_params()
     params:set_action("excavate", function()
         physics.layers_active = 0
         physics.surface_cycles = 0
+        physics.cycle_armed = false
         if engine.clear_layers then
             engine.clear_layers()
         end
@@ -125,6 +128,7 @@ function toggle_formation()
     if not physics.recording then
         physics.surface_cycles = 0
         physics.last_surface_phase = 0.0
+        physics.cycle_armed = false
         
         physics.start_time = util.time()
         engine.record_start()
@@ -154,6 +158,7 @@ function key(n, z)
                 engine.erode_layer()
                 physics.layers_active = physics.layers_active - 1
                 physics.surface_cycles = 0
+                physics.cycle_armed = false
             end
         else
             params:set("auto_record", params:get("auto_record") == 1 and 2 or 1)
