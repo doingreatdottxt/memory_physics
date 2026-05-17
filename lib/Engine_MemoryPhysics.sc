@@ -6,8 +6,8 @@ Engine_MemoryPhysics : CroneEngine {
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
     var <durations;
     
-    // NEW: Effects routing
-    var <fxBus, <fxSynth, <monitorSynth;
+    // Global FX and Background Ambient Asset Routing Buses
+    var <fxBus, <fxSynth, <monitorSynth, <bgSynth;
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
@@ -20,11 +20,11 @@ Engine_MemoryPhysics : CroneEngine {
 
         recBuffer = Buffer.alloc(context.server, context.server.sampleRate * 20, 2);
 
-        // NEW: Audio bus for routing all layers and input into a master FX chain
+        // Hardware decoupling audio routing bus
         fxBus = Bus.audio(context.server, 2);
 
         phaseBus = Bus.control(context.server, maxLayers);
-        weatherBus = Bus.control(context.server, 1).set(0.2); 
+        weatherBus = Bus.control(context.server, 1).set(0.2); // 20% at boot per specification
         pressureBus = Bus.control(context.server, 1).set(0.0);
         envBus = Bus.control(context.server, 1).set(0);
         volBus = Bus.control(context.server, 1).set(1.0);
@@ -38,48 +38,151 @@ Engine_MemoryPhysics : CroneEngine {
         modRqBus = Bus.control(context.server, 1).set(3.0);
         driftBus = Bus.control(context.server, 1).set(0.005);
 
-        // 1. MASTER FX SYNTH
-        // Handles "Rain" (Delay), "Cold" (Distortion), and Global Filtering
+        // 1. GENERATIVE ENVIRONMENTAL BACKGROUND AMBIENCE SYNTH
+        // Handles "Breeze", "Wind", and "Waves" structural rules from the top of the specification list
+        SynthDef(\EnvBackground, { arg out;
+            var w_val, env_idx, noise, breeze, wind, waves;
+            var b_env, w_env, wav_env, trigger_rate, gate_b, gate_w, gate_wav;
+
+            w_val = In.kr(weatherBus.index, 1);
+            env_idx = In.kr(envBus.index, 1);
+
+            // Generative Trigger Clocks running asynchronously
+            trigger_rate = w_val.linlin(0, 1, 0.1, 0.8);
+            gate_b = Dust.kr(trigger_rate);
+            gate_w = Dust.kr(trigger_rate * 0.7);
+            gate_wav = Dust.kr(trigger_rate * 0.5);
+
+            // Strict Attack-Sustain-Release Proportion Curves mapped from rulebook percentages
+            b_env = EnvGen.kr(Env.asr(0.40, 0.45, 0.15, \sin), gate_b);
+            w_env = EnvGen.kr(Env.asr(0.40, 0.45, 0.15, \sin), gate_w);
+            wav_env = EnvGen.kr(Env.asr(0.25, 0.40, 0.35, \sin), gate_wav);
+
+            // Audio Asset Synthesis Pipelines
+            breeze = PinkNoise.ar(w_val.linlin(0, 1, 0.01, 0.04)) * b_env;
+            breeze = BPFilter.ar(breeze, LFNoise1.kr(0.5).exprange(800, 2400), 0.3);
+            breeze = Pan2.ar(breeze, LFNoise1.kr(0.2));
+
+            wind = PinkNoise.ar(w_val.linlin(0, 1, 0.02, 0.08)) * w_env;
+            wind = BPFilter.ar(wind, LFNoise1.kr(0.3).exprange(400, 1600), 0.4);
+            wind = Pan2.ar(wind, LFNoise1.kr(0.1));
+
+            waves = WhiteNoise.ar(w_val.linlin(0, 1, 0.03, 0.12)) * wav_env;
+            waves = LPF.ar(waves, LFNoise1.kr(0.2).exprange(200, 900));
+            waves = Pan2.ar(waves, LFNoise1.kr(0.15));
+
+            // Biome Matrix Mix Engine
+            noise = Select.ar(env_idx % 7, [
+                breeze * 0.5,                                      // 0: Grove
+                wind * 0.6,                                        // 1: Sand
+                wind * 0.8,                                        // 2: Mountain
+                breeze * 0.4,                                      // 3: River Bank
+                Select.ar(w_val > 0.5, [waves * 0.7, wind * 0.6]), // 4: Sea
+                breeze * 0.2,                                      // 5: Swamp
+                Silent.ar(2)                                       // 6: Cave
+            ]);
+
+            Out.ar(out, noise);
+        }).add;
+
+        // 2. MASTER SITE EFFECTS SYNTH PIPELINE
+        // Intercepts loop layers and incoming monitors through unified climate logic modifiers
         SynthDef(\MasterFX, { arg in, out;
             var sig, w_val, p_val, env_idx;
-            var delaySig, filterLpf, filterHpf, driveSig;
+            var localIn, wetSig, delayTime, feedback, mod;
+            var d_lpf, d_hpf, drive, bits, target_sr;
+            var w_gate, layer2_weather;
 
             sig = In.ar(in, 2);
             w_val = In.kr(weatherBus.index, 1);
             p_val = In.kr(pressureBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
 
-            // -- RAIN EFFECT (Delay) --
-            // Applies a single return delay when weather is high
-            delaySig = DelayC.ar(sig, 1.0, w_val.linlin(0, 1, 0.1, 0.6));
-            sig = sig + (delaySig * w_val * 0.5);
+            // --- DESTRUCTIVE ENVIRONMENTAL MODIFIERS MATRIX ---
+            // "Rain" Delay (Feedback Loop network processing)
+            delayTime = p_val.linexp(0, 1, 0.12, 1.4).lag(0.4);
+            feedback = w_val.linlin(0, 1, 0.15, 0.82);
+            localIn = LocalIn.ar(2) * feedback;
+            mod = LFDNoise3.kr(w_val.linlin(0, 1, 0.1, 3.0)).range(0.97, 1.03);
+            wetSig = DelayC.ar(sig + localIn, 2.0, (delayTime * mod).clip(0.01, 2.0));
+            wetSig = LPF.ar(wetSig, 4000);
+            LocalOut.ar(wetSig);
 
-            // -- TEMPERATURE/PRESSURE EFFECTS (Drive & Filtering) --
-            driveSig = (sig * p_val.linexp(0, 1, 1, 5)).tanh;
-            sig = XFade2.ar(sig, driveSig, p_val * 2 - 1);
+            // Select wet rain signal relative to environmental conditions
+            sig = Select.ar(Select.kr(env_idx % 7, [1, 0, 0, 1, 0, 1, 1]), [
+                sig,
+                XFade2.ar(sig, wetSig, w_val * 2 - 1)
+            ]);
 
-            // -- GLOBAL EQ --
-            filterLpf = In.kr(baseFcBus.index, 1);
-            sig = LPF.ar(sig, filterLpf);
+            // --- BIOME SPECIFIC AUDIO FILTERING / DEGRADATION ---
+            // "Dry" vs "Damp" Equalization Curves
+            d_lpf = Select.kr(env_idx % 7, [
+                6000,  // Grove: Damp
+                18000, // Sand: Dry
+                16000, // Mountain: Dry
+                5500,  // River Bank: Damp
+                12000, // Sea
+                2500,  // Swamp: Very Damp
+                3500   // Cave: Damp
+            ]);
+
+            d_hpf = Select.kr(env_idx % 7, [
+                40,   // Grove
+                150,  // Sand: Dry
+                200,  // Mountain: Dry
+                50,   // River Bank
+                80,   // Sea
+                30,   // Swamp
+                100   // Cave
+            ]);
+
+            sig = LPF.ar(sig, d_lpf.lag(0.5));
+            sig = HPF.ar(sig, d_hpf.lag(0.5));
+
+            // "Cold" / "Warm" Temperature Distortion Models
+            drive = Select.kr(env_idx % 7, [
+                1.2, // Grove: Warm
+                3.5, // Sand: Hot
+                5.0, // Mountain: Cold Distortion
+                1.0, // River Bank: Cool
+                1.1, // Sea: Cool
+                1.5, // Swamp: Warm
+                1.0  // Cave
+            ]) * p_val.linexp(0, 1, 1, 4);
+
+            sig = (sig * drive).tanh * (1.0 / (drive.sqrt));
+
+            // Pressure Decimation Engine
+            bits = p_val.linlin(0, 1, 24, 6).round(1);
+            target_sr = p_val.linexp(0, 1, 48000, 12000);
+            sig = sig.round(0.5 ** bits);
+            sig = Latch.ar(sig, Impulse.ar(target_sr));
 
             Out.ar(out, sig * In.kr(volBus.index, 1));
         }).add;
 
-        // 2. LIVE INPUT MONITOR
-        // Routes dry incoming audio to the FX bus so you hear it affected before recording
+        // 3. LIVE INPUT MONITOR
         SynthDef(\InputMonitor, { arg in, out;
             var sig = In.ar(in, 2);
             Out.ar(out, sig);
         }).add;
 
-        // 3. LAYER PLAYBACK
+        // 4. LAYER PLAYBACK ENGINE
         SynthDef(\StrataLayer, { arg buf, out, depth=0, phase_out, dur_idx;
             var sig, phase, duration, rate, layer_vol;
             var drift, layer_weather, crackle, seismic_jitter;
+            var w_val, w_gate;
 
+            w_val = In.kr(weatherBus.index, 1);
             duration = In.kr(durBus.index + dur_idx, 1);
             drift = In.kr(driftBus.index, 1);
-            layer_weather = In.kr(weatherBus.index, 1);
+
+            // Layer 2 Weather Bleed Rule: Caps at 20% influence when climate expands > 80%
+            w_gate = w_val >= 0.8;
+            layer_weather = Select.kr(depth, [
+                w_val, 
+                w_gate * w_val.linlin(0.8, 1.0, 0.0, 0.2)
+            ] ++ Array.fill(maxLayers - 2, { 0.0 }));
 
             crackle = Dust.kr(layer_weather.linlin(0, 1, 0, 45));
             seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
@@ -90,10 +193,9 @@ Engine_MemoryPhysics : CroneEngine {
 
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            // Layer volume attenuates as it gets buried deeper (per your README specs)
+            // LIFO Stratum Volume Decay Array
             layer_vol = Select.kr(depth, [1.0, 0.5, 0.2, 0.0, 0.0, 0.0]);
 
-            // Outputs to FX Bus instead of hardware out
             Out.ar(out, sig * layer_vol);
         }).add;
 
@@ -108,23 +210,29 @@ Engine_MemoryPhysics : CroneEngine {
 
         context.server.sync;
 
-        // Ensure proper node ordering: Track -> Record -> Playback -> Monitor -> FX
+        // Establish strict synchronous node execution chains
         Synth(\InputTracker, [\in, context.in_b[0].index], context.xg);
         
         synths = Array.fill(maxLayers, { arg i;
-            // Notice \out is now fxBus.index
             Synth(\StrataLayer, [\buf, buffers[i], \out, fxBus.index, \depth, i, \dur_idx, i], context.xg);
         });
 
         monitorSynth = Synth(\InputMonitor, [\in, context.in_b[0].index, \out, fxBus.index], context.xg);
+        
+        // Background noise mixed into FX bus before final processing
+        bgSynth = Synth(\EnvBackground, [\out, fxBus.index], context.xg);
+        
         fxSynth = Synth.after(context.xg, \MasterFX, [\in, fxBus.index, \out, context.out_b.index]);
 
         this.addCommand(\shift_layers, "f", { arg msg;
             var new_dur = msg[1];
+            
             (maxLayers - 1).reverseDo({ arg i;
                 if(i > 0) { buffers[i - 1].copyData(buffers[i]); }
             });
+            
             recBuffer.copyData(buffers[0]);
+            
             (maxLayers - 1).reverseDo({ arg i;
                 if(i > 0) {
                     durations[i] = durations[i - 1];
@@ -138,6 +246,11 @@ Engine_MemoryPhysics : CroneEngine {
         this.addCommand(\clear_layers, "", {
             buffers.do({ arg b; b.zero; });
             recBuffer.zero;
+        });
+
+        this.addCommand(\set_duration, "if", { arg msg;
+            durations[msg[1]] = msg[2];
+            context.server.sendMsg("/c_set", durBus.index + msg[1], msg[2]);
         });
 
         this.addCommand(\record_start, "", {
