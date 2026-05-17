@@ -84,7 +84,8 @@ Engine_MemoryPhysics : CroneEngine {
             waves = LPF.ar(waves, wav_freq);
             waves = Pan2.ar(waves, wav_pan);
 
-            noise = Select.ar(env_idx % 7, [
+            // OPTIMIZATION: Converted control rate index to audio rate via K2A to resolve Mix.kr warnings
+            noise = Select.ar(K2A.ar(env_idx % 7), [
                 wind * 0.5,      // 0: Sand
                 wind * 0.8,      // 1: Mountain
                 breeze * 0.6,    // 2: Grove
@@ -126,7 +127,8 @@ Engine_MemoryPhysics : CroneEngine {
             swamp_sig = LPF.ar(Saw.ar(TRand.kr(70, 190, swamp_trig) * (1.0 - (p_val * 0.15))), 750) * swamp_env * e_val.linlin(0.01, 1, 0.0, 0.22);
             swamp_sig = Pan2.ar(swamp_sig, TRand.kr(-0.3, 0.3, swamp_trig));
 
-            sig = Select.ar(env_idx % 7, [
+            // OPTIMIZATION: Converted control rate index to audio rate via K2A
+            sig = Select.ar(K2A.ar(env_idx % 7), [
                 Silent.ar(2),   // 0: Sand
                 Silent.ar(2),   // 1: Mountain
                 grove_sig,      // 2: Grove
@@ -161,7 +163,8 @@ Engine_MemoryPhysics : CroneEngine {
             wetSig = Limiter.ar(wetSig, 0.95, 0.02);
             LocalOut.ar(wetSig);
 
-            sig = Select.ar(Select.kr(env_idx % 7, [0, 0, 1, 1, 0, 1, 1]), [
+            // OPTIMIZATION: Converted combined selection index map to audio rate
+            sig = Select.ar(K2A.ar(Select.kr(env_idx % 7, [0, 0, 1, 1, 0, 1, 1])), [
                 sig, XFade2.ar(sig, wetSig, w_val * 2 - 1)
             ]);
 
@@ -250,8 +253,9 @@ Engine_MemoryPhysics : CroneEngine {
             var mono_sum = (input_signal[0] + input_signal[1]) * 0.5;
             var fft_frame = FFT(LocalBuf(512), mono_sum);
             
-            // FIXED: Avoid mixed positional/keyword bindings to completely remove compilation crash risks
-            var onset_trigger = Onsets.kr(fft_frame, 0.22, \rfft, 1, 0.1, 10, 11, 1, 0);
+            // CRITICAL FIX: Stripped parameter overrides to use native class defaults.
+            // This prevents the symbol lookup dictionary breakdown that injects nil values.
+            var onset_trigger = Onsets.kr(fft_frame, 0.22);
             
             SendReply.kr(Impulse.kr(15), '/in_amp', [Amplitude.kr(mono_sum)], 999);
             SendReply.kr(onset_trigger, '/audio_onset', [1.0], 997);
