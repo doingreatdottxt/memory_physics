@@ -11,7 +11,6 @@ local physics = {
     max_layers = 6,
     shift_held = false,
     silence_frames = 0,
-    -- COMPLIANCE FIX: Added state parameters to track active surface loop cycles
     surface_cycles = 0,
     last_surface_phase = 0.0
 }
@@ -46,7 +45,7 @@ function init()
             if layer_idx >= 1 and layer_idx <= physics.max_layers then
                 layer_phases[layer_idx] = phase_val
                 
-                -- COMPLIANCE FIX: Track surface loop (Layer 1) phase resets to identify cycle completions
+                -- Loop Cycle Monitor Decoder: monitors surface loop boundary flags
                 if layer_idx == 1 and physics.layers_active > 0 and not physics.recording then
                     if phase_val < physics.last_surface_phase and physics.last_surface_phase > 0.88 then
                         physics.surface_cycles = physics.surface_cycles + 1
@@ -107,7 +106,6 @@ end
 
 function toggle_formation()
     if not physics.recording then
-        -- Clean cycle registers to guarantee new surface loops receive a full 5 cycles
         physics.surface_cycles = 0
         physics.last_surface_phase = 0.0
         
@@ -162,7 +160,6 @@ function redraw()
     screen.level(physics.recording and 15 or 3)
     screen.move(0, 8)
     local status = physics.recording and "FORMING STRATA" or "STABLE"
-    -- Modified header to display live cycle monitoring data
     screen.text(status .. " [" .. string.format("%.1f", physics.duration) .. "s] C:" .. physics.surface_cycles .. "/5")
 
     local current_env = envs.list[params:get("environment")]
