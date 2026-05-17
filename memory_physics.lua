@@ -28,7 +28,11 @@ local state = {
   silence_frames = 0,
   surface_cycles = 0,
   last_surface_phase = 0.0,
-  cycle_armed = false
+  cycle_armed = false,
+  
+  -- Rhythm detection data registers
+  onset_timestamps = {},
+  last_onset_time = 0
 }
 
 local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
@@ -54,6 +58,13 @@ function init()
             state.silence_frames = 0
           end
         end
+      end
+      
+    elseif path == "/audio_onset" then
+      local now = util.time()
+      state.last_onset_time = now
+      if state.recording then
+        table.insert(state.onset_timestamps, now)
       end
       
     elseif path == "/layer_phase" then
@@ -131,6 +142,21 @@ function setup_params()
   params:bang()
 end
 
+-- Rhythm engine: extracts the median delta time from playing transients
+local function extract_rhythmic_pulse()
+  if #state.onset_timestamps < 2 then return nil end
+  local deltas = {}
+  for i = 2, #state.onset_timestamps do
+    local diff = state.onset_timestamps[i] - state.onset_timestamps[i-1]
+    if diff > 0.15 then -- Debounce double-trigger anomalies
+      table.insert(deltas, diff)
+    end
+  end
+  if #deltas == 0 then return nil end
+  table.sort(deltas)
+  return deltas[math.ceil(#deltas / 2)] -- Pull the median structural tempo pulse
+end
+
 function calculate_quantized_duration(raw_dur)
   local mode = params:get("quant_mode")
   local final_dur = raw_dur
@@ -140,18 +166,35 @@ function calculate_quantized_duration(raw_dur)
     final_dur = math.min(raw_dur, MAX_TIME)
 
   elseif mode == 2 then
-    -- CLOCK FOLLOW MODE: Snap directly to closest relative beat intervals
+    -- ASSISTED CLOCK FOLLOW MODE: Cross-reference clock grid against real audio transients
     local beat_sec = 60 / (params:get("clock_tempo") or 120)
     local beats = math.floor((raw_dur / beat_sec) + 0.5)
+    
+    -- If an audio accent happened right before button release, use it to shift alignment
+    local time_since_last_transient = util.time() - state.last_onset_time
+    if time_since_last_transient < 0.200 and time_since_last_transient > 0 then
+      local transient_adjusted_dur = raw_dur - time_since_last_transient
+      beats = math.floor((transient_adjusted_dur / beat_sec) + 0.5)
+    end
+    
     beats = math.max(1, beats)
     final_dur = math.min(beats * beat_sec, MAX_TIME)
 
   elseif mode == 3 then
-    -- BAR MODE: Base duration determines grid array multipliers
+    -- ASSISTED BAR MODE
     if state.layers_active == 0 then
-      final_dur = math.min(raw_dur, MAX_TIME)
+      -- First layer baseline calculation assisted by pulse tracking
+      local detected_pulse = extract_rhythmic_pulse()
+      if detected_pulse then
+        local estimated_beats = math.floor((raw_dur / detected_pulse) + 0.5)
+        estimated_beats = math.max(1, estimated_beats)
+        final_dur = math.min(estimated_beats * detected_pulse, MAX_TIME)
+      else
+        final_dur = math.min(raw_dur, MAX_TIME)
+      end
       params:set("bar_length", final_dur)
     else
+      -- Subsequent layers: Snap cleanly onto sub-divisions or macro multiples
       local master_bar = params:get("bar_length")
       local best_diff = math.huge
       local best_dur = master_bar
@@ -179,6 +222,7 @@ function toggle_formation()
     state.surface_cycles = 0
     state.last_surface_phase = 0.0
     state.cycle_armed = false
+    state.onset_timestamps = {} -- Flush rhythm tracking log array
     state.start_time = util.time()
     engine.record_start()
     state.recording = true
