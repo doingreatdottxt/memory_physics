@@ -16,7 +16,6 @@ Engine_MemoryPhysics : CroneEngine {
     alloc {
         luaAddr = NetAddr("127.0.0.1", 10111);
 
-        // Stationary Buffer Array - allocated hardware instances never swap indices
         buffers = Array.fill(maxLayers, {
             Buffer.alloc(context.server, context.server.sampleRate * 20, 2);
         });
@@ -48,42 +47,68 @@ Engine_MemoryPhysics : CroneEngine {
         }, '/layer_phase', context.server.addr).fix;
 
         // 1. GENERATIVE ENVIRONMENTAL BACKGROUND AMBIENCE SYNTH
+        // Fully updated to track the exact mathematical percentage specifications outlined in the README
         SynthDef(\EnvBackground, { arg out;
             var w_val, env_idx, noise, breeze, wind, waves;
-            var b_env, w_env, wav_env, trigger_rate, gate_b, gate_w, gate_wav;
+            var b_trig, b_dur, b_env, b_freq, b_pan, b_amp;
+            var w_trig, w_dur, w_env, w_freq, w_pan, w_amp;
+            var wav_trig, wav_dur, wav_env, wav_freq, wav_pan, wav_amp;
 
             w_val = In.kr(weatherBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
 
-            trigger_rate = w_val.linlin(0, 1, 0.1, 0.8);
-            gate_b = Dust.kr(trigger_rate);
-            gate_w = Dust.kr(trigger_rate * 0.7);
-            gate_wav = Dust.kr(trigger_rate * 0.5);
+            // --- BREEZE STRUCTURAL RULES (Grove / River Bank / Swamp) ---
+            // Trigger rate expands dynamically with weather intensity
+            b_trig = Dust.kr(w_val.linlin(0, 1, 0.08, 0.42));
+            // Sample a unique duration for each individual breeze event (3 to 8 seconds)
+            b_dur = TRand.kr(3.0, 8.0, b_trig);
+            // Envelope specification: 40% Attack, 45% Sustain, 15% Release
+            b_env = EnvGen.kr(Env([0, 1, 1, 0], [0.40, 0.45, 0.15], \sin), b_trig, timeScale: b_dur);
+            // Latched randomizations capture distinct properties on every single trigger
+            b_freq = TExpRand.kr(850, 2100, b_trig).lag(1.2);
+            b_pan = TRand.kr(-0.75, 0.75, b_trig).lag(2.0);
+            b_amp = TRand.kr(0.45, 1.0, b_trig) * w_val.linlin(0, 1, 0.01, 0.07);
+            
+            breeze = PinkNoise.ar(b_amp) * b_env;
+            breeze = BPF.ar(breeze, b_freq, TRand.kr(0.22, 0.38, b_trig));
+            breeze = Pan2.ar(breeze, b_pan);
 
-            b_env = EnvGen.kr(Env.asr(0.40, 0.45, 0.15, \sin), gate_b);
-            w_env = EnvGen.kr(Env.asr(0.40, 0.45, 0.15, \sin), gate_w);
-            wav_env = EnvGen.kr(Env.asr(0.25, 0.40, 0.35, \sin), gate_wav);
+            // --- WIND STRUCTURAL RULES (Sand / Mountain / Sea) ---
+            w_trig = Dust.kr(w_val.linlin(0, 1, 0.05, 0.35));
+            w_dur = TRand.kr(5.0, 12.0, w_trig);
+            // Envelope specification: 40% Attack, 45% Sustain, 15% Release
+            w_env = EnvGen.kr(Env([0, 1, 1, 0], [0.40, 0.45, 0.15], \sin), w_trig, timeScale: w_dur);
+            w_freq = TExpRand.kr(320, 1400, w_trig).lag(1.8);
+            w_pan = TRand.kr(-0.95, 0.95, w_trig).lag(3.5);
+            w_amp = TRand.kr(0.40, 1.0, w_trig) * w_val.linlin(0, 1, 0.02, 0.14);
+            
+            wind = PinkNoise.ar(w_amp) * w_env;
+            wind = BPF.ar(wind, w_freq, TRand.kr(0.35, 0.55, w_trig));
+            wind = Pan2.ar(wind, w_pan);
 
-            breeze = PinkNoise.ar(w_val.linlin(0, 1, 0.01, 0.04)) * b_env;
-            breeze = BPF.ar(breeze, LFNoise1.kr(0.5).exprange(800, 2400), 0.3);
-            breeze = Pan2.ar(breeze, LFNoise1.kr(0.2));
+            // --- WAVES STRUCTURAL RULES (Sea Biome Overlay) ---
+            wav_trig = Dust.kr(w_val.linlin(0, 1, 0.04, 0.22));
+            wav_dur = TRand.kr(6.0, 15.0, wav_trig);
+            -- Envelope specification: 25% Attack, 40% Sustain, 35% Release
+            wav_env = EnvGen.kr(Env([0, 1, 1, 0], [0.25, 0.40, 0.35], \sin), wav_trig, timeScale: wav_dur);
+            // Continuous internal LFO simulates a sweeping aquatic tidal wash motion
+            wav_freq = SinOsc.kr(1 / wav_dur).exprange(160, 480);
+            wav_pan = LFNoise1.kr(1 / wav_dur).range(-0.7, 0.7);
+            wav_amp = w_val.linlin(0, 1, 0.03, 0.16) * wav_env;
+            
+            waves = WhiteNoise.ar(wav_amp);
+            waves = LPF.ar(waves, wav_freq);
+            waves = Pan2.ar(waves, wav_pan);
 
-            wind = PinkNoise.ar(w_val.linlin(0, 1, 0.02, 0.08)) * w_env;
-            wind = BPF.ar(wind, LFNoise1.kr(0.3).exprange(400, 1600), 0.4);
-            wind = Pan2.ar(wind, LFNoise1.kr(0.1));
-
-            waves = WhiteNoise.ar(w_val.linlin(0, 1, 0.03, 0.12)) * wav_env;
-            waves = LPF.ar(waves, LFNoise1.kr(0.2).exprange(200, 900));
-            waves = Pan2.ar(waves, LFNoise1.kr(0.15));
-
+            // Biome Matrix Selector Engine
             noise = Select.ar(env_idx % 7, [
-                breeze * 0.5,                                      
-                wind * 0.6,                                        
-                wind * 0.8,                                        
-                breeze * 0.4,                                      
-                Select.ar(w_val > 0.5, [waves * 0.7, wind * 0.6]), 
-                breeze * 0.2,                                      
-                Silent.ar(2)                                       
+                breeze * 0.6,                                      // 0: Grove
+                wind * 0.7,                                        // 1: Sand
+                wind * 0.9,                                        // 2: Mountain
+                breeze * 0.5,                                      // 3: River Bank
+                Select.ar(w_val > 0.5, [waves * 0.8, wind * 0.6]), // 4: Sea
+                breeze * 0.3,                                      // 5: Swamp
+                Silent.ar(2)                                       // 6: Cave
             ]);
 
             Out.ar(out, noise);
@@ -221,24 +246,20 @@ Engine_MemoryPhysics : CroneEngine {
         bgSynth = Synth(\EnvBackground, [\out, fxBus.index], context.xg);
         fxSynth = Synth.after(context.xg, \MasterFX, [\in, fxBus.index, \out, context.out_b.index]);
 
-        // REVERT FIX: Back to stationary block copy mechanics to protect running clocks and phasor alignment
         this.addCommand(\shift_layers, "f", { arg msg;
             var new_dur = msg[1];
             
-            // Push audio sample arrays down sequentially
             (maxLayers - 2).reverseDo({ arg i;
                 buffers[i].copyData(buffers[i + 1]);
                 durations[i + 1] = durations[i];
                 context.server.sendMsg("/c_set", durBus.index + i + 1, durations[i + 1]);
             });
             
-            // Print freshly captured isolate buffer cleanly to top layer slot
             recBuffer.copyData(buffers[0]);
             durations[0] = new_dur;
             context.server.sendMsg("/c_set", durBus.index, new_dur);
         });
 
-        // REVERT FIX: Back to raw forward-copy data migration to support automated structural unburial
         this.addCommand(\erode_layer, "", {
             (maxLayers - 1).do({ arg i;
                 buffers[i + 1].copyData(buffers[i]);
@@ -246,7 +267,6 @@ Engine_MemoryPhysics : CroneEngine {
                 context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
             });
             
-            // Erase trailing layer block at end of operations to prevent trailing echoes
             buffers[maxLayers - 1].zero;
             durations[maxLayers - 1] = 2.0;
             context.server.sendMsg("/c_set", durBus.index + (maxLayers - 1), 2.0);
