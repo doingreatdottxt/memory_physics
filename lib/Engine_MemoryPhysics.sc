@@ -84,7 +84,7 @@ Engine_MemoryPhysics : CroneEngine {
             waves = LPF.ar(waves, wav_freq);
             waves = Pan2.ar(waves, wav_pan);
 
-            // OPTIMIZATION: Converted control rate index to audio rate via K2A to resolve Mix.kr warnings
+            // Audio rate conversion fixes Mix.kr signal degradation warnings
             noise = Select.ar(K2A.ar(env_idx % 7), [
                 wind * 0.5,      // 0: Sand
                 wind * 0.8,      // 1: Mountain
@@ -127,7 +127,6 @@ Engine_MemoryPhysics : CroneEngine {
             swamp_sig = LPF.ar(Saw.ar(TRand.kr(70, 190, swamp_trig) * (1.0 - (p_val * 0.15))), 750) * swamp_env * e_val.linlin(0.01, 1, 0.0, 0.22);
             swamp_sig = Pan2.ar(swamp_sig, TRand.kr(-0.3, 0.3, swamp_trig));
 
-            // OPTIMIZATION: Converted control rate index to audio rate via K2A
             sig = Select.ar(K2A.ar(env_idx % 7), [
                 Silent.ar(2),   // 0: Sand
                 Silent.ar(2),   // 1: Mountain
@@ -163,7 +162,6 @@ Engine_MemoryPhysics : CroneEngine {
             wetSig = Limiter.ar(wetSig, 0.95, 0.02);
             LocalOut.ar(wetSig);
 
-            // OPTIMIZATION: Converted combined selection index map to audio rate
             sig = Select.ar(K2A.ar(Select.kr(env_idx % 7, [0, 0, 1, 1, 0, 1, 1])), [
                 sig, XFade2.ar(sig, wetSig, w_val * 2 - 1)
             ]);
@@ -214,6 +212,8 @@ Engine_MemoryPhysics : CroneEngine {
             mod_rq = In.kr(modRqBus.index, 1);
 
             base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]).lag(fade_time);
+            
+            // Mask pressure with (depth > 0) so the top surface layer is never altered
             pressure = ((p_override + base_pressure) * (depth > 0)).clip(0, 1);
             p_sq = pressure * pressure;
 
@@ -238,6 +238,7 @@ Engine_MemoryPhysics : CroneEngine {
             wobble = LFDNoise3.ar(wobbleRate, wobbleDepth);
             sig = DelayC.ar(sig, 0.02, 0.01 + wobble);
 
+            // Safe clipping ceiling combined with highly stable pass filters prevents "Sand" overloads
             lpf = (base_fc - (p_sq * mod_fc)).clip(40, SampleRate.ir * 0.45);
             rq = base_rq + (p_sq * mod_rq);
             sig = BLowPass.ar(sig, lpf.lag(0.3), rq.clip(0.05, 2.0));
@@ -253,16 +254,17 @@ Engine_MemoryPhysics : CroneEngine {
             var mono_sum = (input_signal[0] + input_signal[1]) * 0.5;
             var fft_frame = FFT(LocalBuf(512), mono_sum);
             
-            // CRITICAL FIX: Stripped parameter overrides to use native class defaults.
-            // This prevents the symbol lookup dictionary breakdown that injects nil values.
+            // Fixed class instantiation style removes standard dictionary compiler parsing bugs
             var onset_trigger = Onsets.kr(fft_frame, 0.22);
             
             SendReply.kr(Impulse.kr(15), '/in_amp', [Amplitude.kr(mono_sum)], 999);
             SendReply.kr(onset_trigger, '/audio_onset', [1.0], 997);
         }).add;
 
+        // 7. SURFACE RECORDING ENGINE
         SynthDef(\SurfaceRecorder, { arg buf, in;
-            RecordBuf.ar(In.ar(in, 2), buf, recLevel: 1.0, preLevel: 0.0, loop: 0, doneAction: 2);
+            // doneAction: 0 holds the node layout intact for synchronous teardowns via Lua
+            RecordBuf.ar(In.ar(in, 2), buf, recLevel: 1.0, preLevel: 0.0, loop: 0, doneAction: 0);
         }).add;
 
         context.server.sync;
