@@ -82,8 +82,13 @@ Engine_MemoryPhysics : CroneEngine {
             waves = Pan2.ar(waves, wav_pan);
 
             noise = Select.ar(env_idx % 7, [
-                breeze * 0.6, wind * 0.7, wind * 0.8, breeze * 0.5,
-                Select.ar(e_val > 0.5, [waves * 0.8, wind * 0.6]), breeze * 0.3, Silent.ar(2)
+                breeze * 0.6,    // 0: Grove
+                Silent.ar(2),    // 1: Sand
+                Silent.ar(2),    // 2: Mountain
+                grove_sig,       // 3: River Bank
+                Silent.ar(2),    // 4: Sea
+                swamp_sig,       // 5: Swamp
+                cave_sig         // 6: Cave
             ]);
             Out.ar(out, noise);
         }).add;
@@ -119,13 +124,13 @@ Engine_MemoryPhysics : CroneEngine {
             swamp_sig = Pan2.ar(swamp_sig, TRand.kr(-0.3, 0.3, swamp_trig));
 
             sig = Select.ar(env_idx % 7, [
-                grove_sig,      -- 0: Grove
-                Silent.ar(2),   -- 1: Sand
-                Silent.ar(2),   -- 2: Mountain
-                grove_sig,      -- 3: River Bank
-                Silent.ar(2),   -- 4: Sea
-                swamp_sig,      -- 5: Swamp
-                cave_sig        -- 6: Cave
+                grove_sig,      // 0: Grove
+                Silent.ar(2),   // 1: Sand
+                Silent.ar(2),   // 2: Mountain
+                grove_sig,      // 3: River Bank
+                Silent.ar(2),   // 4: Sea
+                swamp_sig,      // 5: Swamp
+                cave_sig        // 6: Cave
             ]);
             Out.ar(out, sig);
         }).add;
@@ -207,9 +212,7 @@ Engine_MemoryPhysics : CroneEngine {
             p_sq = pressure * pressure;
 
             w_gate = w_val >= 0.8;
-            layer_weather = Select.kr(depth, [
-                w_val, w_gate * w_val.linlin(0.8, 1.0, 0.0, 0.2)
-            ] ++ Array.fill(maxLayers - 2, { 0.0 })).lag(fade_time);
+            layer_weather = Select.kr(depth, [w_val, w_gate * w_val.linlin(0.8, 1.0, 0.0, 0.2)] ++ Array.fill(maxLayers - 2, { 0.0 })).lag(fade_time);
 
             crackle = Dust.kr(layer_weather.linlin(0, 1, 0, 45));
             seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
@@ -309,7 +312,7 @@ Engine_MemoryPhysics : CroneEngine {
         this.addCommand(\set_env, "i", { arg msg; envBus.set(msg[1]); });
         this.addCommand(\set_volume, "f", { arg msg; volBus.set(msg[1]); });
         this.addCommand(\set_environment_params, "fffff", { arg msg;
-            baseFcBus.set(msg[1]); modFcBus.set(msg[2]); baseRqBus.set(msg[3]); modRqBus.set(msg[4]); driftBus.set(msg[5]);
+            baseFcBus.set(msg[1]); modFcBus.set(msg[2]); base_rqBus.set(msg[3]); modRqBus.set(msg[4]); driftBus.set(msg[5]);
         });
     }
 
