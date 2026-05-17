@@ -220,34 +220,45 @@ Engine_MemoryPhysics : CroneEngine {
         bgSynth = Synth(\EnvBackground, [\out, fxBus.index], context.xg);
         fxSynth = Synth.after(context.xg, \MasterFX, [\in, fxBus.index, \out, context.out_b.index]);
 
-        // BUG FIX: Rewrote loop offsets to correctly shift all 6 layers downward without truncation
+        // BUG FIX: Rewrote shift operations as instantaneous allocation pointer swaps to fix server race conditions
         this.addCommand(\shift_layers, "f", { arg msg;
             var new_dur = msg[1];
-            (maxLayers - 1).reverseDo({ arg i;
-                var dest = i + 1;
-                var src = i;
-                buffers[src].copyData(buffers[dest]);
-                durations[dest] = durations[src];
-                context.server.sendMsg("/c_set", durBus.index + dest, durations[dest]);
+            var oldLastBuffer = buffers[maxLayers - 1];
+
+            (maxLayers - 2).reverseDo({ arg i;
+                buffers[i + 1] = buffers[i];
+                durations[i + 1] = durations[i];
             });
             
-            recBuffer.copyData(buffers[0]);
+            buffers[0] = recBuffer;
             durations[0] = new_dur;
-            context.server.sendMsg("/c_set", durBus.index, new_dur);
+            
+            recBuffer = oldLastBuffer;
+            recBuffer.zero;
+
+            maxLayers.do({ arg i;
+                synths[i].set(\buf, buffers[i]);
+                context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
+            });
         });
 
-        // BUG FIX: Cleared destination-erasing race condition to allow loops to cleanly unbury/re-emerge
+        // BUG FIX: Rewrote erosion operations using language-side pointers to guarantee smooth unburial/re-emergence
         this.addCommand(\erode_layer, "", {
+            var oldFirstBuffer = buffers[0];
+
             (maxLayers - 1).do({ arg i;
-                var dest = i;
-                var src = i + 1;
-                buffers[src].copyData(buffers[dest]);
-                durations[dest] = durations[src];
-                context.server.sendMsg("/c_set", durBus.index + dest, durations[dest]);
+                buffers[i] = buffers[i + 1];
+                durations[i] = durations[i + 1];
             });
+            
+            buffers[maxLayers - 1] = oldFirstBuffer;
             buffers[maxLayers - 1].zero;
             durations[maxLayers - 1] = 2.0;
-            context.server.sendMsg("/c_set", durBus.index + (maxLayers - 1), 2.0);
+
+            maxLayers.do({ arg i;
+                synths[i].set(\buf, buffers[i]);
+                context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
+            });
         });
 
         this.addCommand(\clear_layers, "", {
