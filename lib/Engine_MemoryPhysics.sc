@@ -2,7 +2,7 @@
 Engine_MemoryPhysics : CroneEngine {
     var <buffers, <synths, <recSynth, <maxLayers = 6;
     var <recBuffer; 
-    var <phaseBus, <weatherBus, <pressureBus, <envBus, <volBus, <durBus;
+    var <phaseBus, <envIntBus, <weatherBus, <pressureBus, <envBus, <volBus, <durBus;
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
     var <durations;
     
@@ -24,6 +24,8 @@ Engine_MemoryPhysics : CroneEngine {
         fxBus = Bus.audio(context.server, 2);
 
         phaseBus = Bus.control(context.server, maxLayers);
+        
+        envIntBus = Bus.control(context.server, 1).set(1.0);
         weatherBus = Bus.control(context.server, 1).set(0.2); 
         pressureBus = Bus.control(context.server, 1).set(0.0);
         envBus = Bus.control(context.server, 1).set(0);
@@ -48,42 +50,42 @@ Engine_MemoryPhysics : CroneEngine {
 
         // 1. GENERATIVE ENVIRONMENTAL BACKGROUND AMBIENCE SYNTH
         SynthDef(\EnvBackground, { arg out;
-            var w_val, env_idx, noise, breeze, wind, waves;
+            var e_val, env_idx, noise, breeze, wind, waves;
             var b_trig, b_dur, b_env, b_freq, b_pan, b_amp;
             var w_trig, w_dur, w_env, w_freq, w_pan, w_amp;
             var wav_trig, wav_dur, wav_env, wav_freq, wav_pan, wav_amp;
 
-            w_val = In.kr(weatherBus.index, 1);
+            e_val = In.kr(envIntBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
 
-            b_trig = Dust.kr(w_val.linlin(0, 1, 0.08, 0.42));
+            b_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 0.42));
             b_dur = TRand.kr(3.0, 8.0, b_trig);
             b_env = EnvGen.kr(Env([0, 1, 1, 0], [0.40, 0.45, 0.15], \sin), b_trig, timeScale: b_dur);
             b_freq = TExpRand.kr(850, 2100, b_trig).lag(1.2);
             b_pan = TRand.kr(-0.75, 0.75, b_trig).lag(2.0);
-            b_amp = TRand.kr(0.45, 1.0, b_trig) * w_val.linlin(0, 1, 0.01, 0.07);
+            b_amp = TRand.kr(0.45, 1.0, b_trig) * e_val.linlin(0.01, 1, 0.0, 0.07);
             
             breeze = PinkNoise.ar(b_amp) * b_env;
             breeze = BPF.ar(breeze, b_freq, TRand.kr(0.22, 0.38, b_trig));
             breeze = Pan2.ar(breeze, b_pan);
 
-            w_trig = Dust.kr(w_val.linlin(0, 1, 0.05, 0.35));
+            w_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 0.35));
             w_dur = TRand.kr(5.0, 12.0, w_trig);
             w_env = EnvGen.kr(Env([0, 1, 1, 0], [0.40, 0.45, 0.15], \sin), w_trig, timeScale: w_dur);
             w_freq = TExpRand.kr(320, 1400, w_trig).lag(1.8);
             w_pan = TRand.kr(-0.95, 0.95, w_trig).lag(3.5);
-            w_amp = TRand.kr(0.40, 1.0, w_trig) * w_val.linlin(0, 1, 0.02, 0.14);
+            w_amp = TRand.kr(0.40, 1.0, w_trig) * e_val.linlin(0.01, 1, 0.0, 0.14);
             
             wind = PinkNoise.ar(w_amp) * w_env;
             wind = BPF.ar(wind, w_freq, TRand.kr(0.35, 0.55, w_trig));
             wind = Pan2.ar(wind, w_pan);
 
-            wav_trig = Dust.kr(w_val.linlin(0, 1, 0.04, 0.22));
+            wav_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 0.22));
             wav_dur = TRand.kr(6.0, 15.0, wav_trig);
             wav_env = EnvGen.kr(Env([0, 1, 1, 0], [0.25, 0.40, 0.35], \sin), wav_trig, timeScale: wav_dur);
             wav_freq = SinOsc.kr(1 / wav_dur).exprange(160, 480);
             wav_pan = LFNoise1.kr(1 / wav_dur).range(-0.7, 0.7);
-            wav_amp = w_val.linlin(0, 1, 0.03, 0.16) * wav_env;
+            wav_amp = e_val.linlin(0.01, 1, 0.0, 0.16) * wav_env;
             
             waves = WhiteNoise.ar(wav_amp);
             waves = LPF.ar(waves, wav_freq);
@@ -94,7 +96,7 @@ Engine_MemoryPhysics : CroneEngine {
                 wind * 0.7,                                        
                 wind * 0.8,                                        
                 breeze * 0.5,                                      
-                Select.ar(w_val > 0.5, [waves * 0.8, wind * 0.6]), 
+                Select.ar(e_val > 0.5, [waves * 0.8, wind * 0.6]), 
                 breeze * 0.3,                                      
                 Silent.ar(2)                                       
             ]);
@@ -104,43 +106,42 @@ Engine_MemoryPhysics : CroneEngine {
 
         // 2. GENERATIVE ENVIRONMENTAL MICRO-CHIRP SYNTH PIPELINE
         SynthDef(\EnvChirps, { arg out;
-            var w_val, p_val, env_idx, sig;
+            var e_val, p_val, env_idx, sig;
             var grove_trig, grove_env, grove_freq, grove_sig;
             var sand_trig, sand_env, sand_sig;
             var cave_trig, cave_env, cave_freq, cave_sig;
             var swamp_pulse, swamp_trig, swamp_gate, swamp_env, swamp_sig;
 
-            w_val = In.kr(weatherBus.index, 1);
+            e_val = In.kr(envIntBus.index, 1);
             p_val = In.kr(pressureBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
 
-            // --- GROVE / RIVER BANK: Biological Avian/Insect Trills ---
-            grove_trig = Dust.kr(w_val.linlin(0, 1, 0.05, 0.75) * (1.0 - (p_val * 0.6)));
+            // --- GROVE / RIVER BANK ---
+            grove_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 0.75) * (1.0 - (p_val * 0.6)));
             grove_env = EnvGen.ar(Env.perc(0.005, TRand.kr(0.03, 0.12, grove_trig)), grove_trig);
             grove_freq = TExpRand.kr(1600, 3800, grove_trig) + (grove_env * TRand.kr(400, 1200, grove_trig));
-            grove_sig = SinOsc.ar(grove_freq * (1.0 - (p_val * 0.25))) * grove_env * w_val.linlin(0, 1, 0.0, 0.12);
+            grove_sig = SinOsc.ar(grove_freq * (1.0 - (p_val * 0.25))) * grove_env * e_val.linlin(0.01, 1, 0.0, 0.12);
             grove_sig = Pan2.ar(grove_sig, TRand.kr(-0.6, 0.6, grove_trig));
 
-            // --- SAND / SEA: Mineral/Granular Shell Friction Clicks ---
-            sand_trig = Dust.kr(w_val.linlin(0, 1, 0.2, 3.5));
+            // --- SAND / SEA ---
+            sand_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 3.5));
             sand_env = EnvGen.ar(Env.perc(0.001, TRand.kr(0.005, 0.025, sand_trig)), sand_trig);
-            sand_sig = BPF.ar(WhiteNoise.ar(), TExpRand.kr(4000, 9500, sand_trig), 0.15) * sand_env * w_val.linlin(0, 1, 0.0, 0.18);
+            sand_sig = BPF.ar(WhiteNoise.ar(), TExpRand.kr(4000, 9500, sand_trig), 0.15) * sand_env * e_val.linlin(0.01, 1, 0.0, 0.18);
             sand_sig = Pan2.ar(sand_sig, TRand.kr(-0.8, 0.8, sand_trig));
 
-            // --- MOUNTAIN / CAVE: Resonant Crystal Pings / Structural Stress Fractures ---
-            cave_trig = Dust.kr(w_val.linlin(0, 1, 0.02, 0.28));
-            // BUG FIX: Replaced non-existent 'Env.curve' method with native 'Env.perc'
+            // --- MOUNTAIN / CAVE ---
+            cave_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 0.28));
             cave_env = EnvGen.ar(Env.perc(0.002, 0.35, 1.0, -6), cave_trig);
             cave_freq = TExpRand.kr(900, 2600, cave_trig) * (1.0 - (p_val * 0.3));
             cave_sig = Ringz.ar(PinkNoise.ar(0.004) * cave_env, cave_freq, TRand.kr(0.08, 0.3, cave_trig)) * cave_env * 0.35;
             cave_sig = Pan2.ar(cave_sig, TRand.kr(-0.5, 0.5, cave_trig));
 
-            // --- SWAMP: Amphibious Rhythmic Croaks / Dense Critter Vibrations ---
-            swamp_trig = Dust.kr(w_val.linlin(0, 1, 0.08, 0.65) * (1.0 - (p_val * 0.4)));
+            // --- SWAMP ---
+            swamp_trig = Dust.kr(e_val.linlin(0.01, 1, 0.0, 0.65) * (1.0 - (p_val * 0.4)));
             swamp_pulse = Impulse.kr(TRand.kr(6, 24, swamp_trig));
             swamp_gate = EnvGen.kr(Env.perc(0.04, 0.28), swamp_trig);
             swamp_env = EnvGen.ar(Env.perc(0.003, 0.015), swamp_pulse * swamp_gate);
-            swamp_sig = LPF.ar(Saw.ar(TRand.kr(70, 190, swamp_trig) * (1.0 - (p_val * 0.15))), 750) * swamp_env * w_val.linlin(0, 1, 0.0, 0.22);
+            swamp_sig = LPF.ar(Saw.ar(TRand.kr(70, 190, swamp_trig) * (1.0 - (p_val * 0.15))), 750) * swamp_env * e_val.linlin(0.01, 1, 0.0, 0.22);
             swamp_sig = Pan2.ar(swamp_sig, TRand.kr(-0.3, 0.3, swamp_trig));
 
             sig = Select.ar(env_idx % 7, [
@@ -210,7 +211,7 @@ Engine_MemoryPhysics : CroneEngine {
             var sig, phase, duration, rate, layer_vol;
             var drift, layer_weather, crackle, seismic_jitter;
             var w_val, w_gate, env_idx, p_override, base_pressure, pressure;
-            var base_fc, mod_fc, base_rq, mod_rq, lpf, rq, p_sq, noise;
+            var base_fc, mod_fc, base_rq, mod_rq, lpf, rq, p_sq;
             var drive, bits, target_sr, crushSig, driveSig;
 
             w_val = In.kr(weatherBus.index, 1);
@@ -242,12 +243,6 @@ Engine_MemoryPhysics : CroneEngine {
             sig = BufRd.ar(2, buf, phase, loop: 1);
 
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
-
-            noise = Select.ar(env_idx % 7, [
-                BrownNoise.ar(0.08), PinkNoise.ar(0.12), WhiteNoise.ar(0.04), 
-                PinkNoise.ar(0.06), WhiteNoise.ar(0.1), BrownNoise.ar(0.15), PinkNoise.ar(0.03)
-            ]) * layer_weather;
-            sig = sig + noise;
 
             drive = Select.kr(env_idx % 7, [1.2, 3.5, 5.0, 1.0, 1.1, 1.5, 1.0]) * pressure.linexp(0, 1, 1, 4);
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
@@ -336,6 +331,7 @@ Engine_MemoryPhysics : CroneEngine {
             recSynth.free;
         });
 
+        this.addCommand(\set_env_intensity, "f", { arg msg; envIntBus.set(msg[1]); });
         this.addCommand(\set_weather, "f", { arg msg; weatherBus.set(msg[1]); });
         this.addCommand(\set_pressure, "f", { arg msg; pressureBus.set(msg[1]); });
         this.addCommand(\set_env, "i", { arg msg; envBus.set(msg[1]); });
