@@ -5,6 +5,9 @@ Engine_MemoryPhysics : CroneEngine {
     var <phaseBus, <weatherBus, <pressureBus, <envBus, <volBus, <durBus;
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
     var <durations;
+    
+    // NEW: Effects routing
+    var <fxBus, <fxSynth, <monitorSynth;
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
@@ -16,6 +19,9 @@ Engine_MemoryPhysics : CroneEngine {
         });
 
         recBuffer = Buffer.alloc(context.server, context.server.sampleRate * 20, 2);
+
+        // NEW: Audio bus for routing all layers and input into a master FX chain
+        fxBus = Bus.audio(context.server, 2);
 
         phaseBus = Bus.control(context.server, maxLayers);
         weatherBus = Bus.control(context.server, 1).set(0.2); 
@@ -32,33 +38,50 @@ Engine_MemoryPhysics : CroneEngine {
         modRqBus = Bus.control(context.server, 1).set(3.0);
         driftBus = Bus.control(context.server, 1).set(0.005);
 
-        SynthDef(\StrataLayer, { arg buf, out, depth=0, phase_out, dur_idx;
-            var sig, pressure, lpf, phase, noise, w_val, env, v, duration;
-            var base_fc, mod_fc, base_rq, mod_rq, drift, p_sq, rq, layer_weather, rate;
-            var drive, bits, target_sr, crackle, seismic_jitter;
-            var layer_vol, base_pressure, w_gate;
+        // 1. MASTER FX SYNTH
+        // Handles "Rain" (Delay), "Cold" (Distortion), and Global Filtering
+        SynthDef(\MasterFX, { arg in, out;
+            var sig, w_val, p_val, env_idx;
+            var delaySig, filterLpf, filterHpf, driveSig;
 
+            sig = In.ar(in, 2);
             w_val = In.kr(weatherBus.index, 1);
-            v = In.kr(volBus.index, 1);
-            env = In.kr(envBus.index, 1);
+            p_val = In.kr(pressureBus.index, 1);
+            env_idx = In.kr(envBus.index, 1);
+
+            // -- RAIN EFFECT (Delay) --
+            // Applies a single return delay when weather is high
+            delaySig = DelayC.ar(sig, 1.0, w_val.linlin(0, 1, 0.1, 0.6));
+            sig = sig + (delaySig * w_val * 0.5);
+
+            // -- TEMPERATURE/PRESSURE EFFECTS (Drive & Filtering) --
+            driveSig = (sig * p_val.linexp(0, 1, 1, 5)).tanh;
+            sig = XFade2.ar(sig, driveSig, p_val * 2 - 1);
+
+            // -- GLOBAL EQ --
+            filterLpf = In.kr(baseFcBus.index, 1);
+            sig = LPF.ar(sig, filterLpf);
+
+            Out.ar(out, sig * In.kr(volBus.index, 1));
+        }).add;
+
+        // 2. LIVE INPUT MONITOR
+        // Routes dry incoming audio to the FX bus so you hear it affected before recording
+        SynthDef(\InputMonitor, { arg in, out;
+            var sig = In.ar(in, 2);
+            Out.ar(out, sig);
+        }).add;
+
+        // 3. LAYER PLAYBACK
+        SynthDef(\StrataLayer, { arg buf, out, depth=0, phase_out, dur_idx;
+            var sig, phase, duration, rate, layer_vol;
+            var drift, layer_weather, crackle, seismic_jitter;
+
             duration = In.kr(durBus.index + dur_idx, 1);
-            base_fc = In.kr(baseFcBus.index, 1);
-            mod_fc = In.kr(modFcBus.index, 1);
-            base_rq = In.kr(baseRqBus.index, 1);
-            mod_rq = In.kr(modRqBus.index, 1);
             drift = In.kr(driftBus.index, 1);
+            layer_weather = In.kr(weatherBus.index, 1);
 
-            base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]);
-            pressure = (In.kr(pressureBus.index, 1) + base_pressure).clip(0, 1);
-            p_sq = pressure * pressure;
-
-            w_gate = w_val >= 0.8;
-            layer_weather = Select.kr(depth, [
-                w_val, 
-                w_gate * w_val.linlin(0.8, 1.0, 0.0, 0.2)
-            ] ++ Array.fill(maxLayers - 2, { 0.0 }));
-
-            crackle = Dust.kr(layer_weather.linlin(0, 1, 0, 45) * (pressure + 0.1));
+            crackle = Dust.kr(layer_weather.linlin(0, 1, 0, 45));
             seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
             rate = 1.0 + (SinOsc.kr(drift * 25) * (layer_weather * drift)) + seismic_jitter;
 
@@ -67,28 +90,11 @@ Engine_MemoryPhysics : CroneEngine {
 
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            // BUG FIX: Removed syntax-breaking inline assignment statement
-            noise = Select.ar(env % 7, [
-                BrownNoise.ar(0.08), PinkNoise.ar(0.12), WhiteNoise.ar(0.04), 
-                PinkNoise.ar(0.06), WhiteNoise.ar(0.1), BrownNoise.ar(0.15), PinkNoise.ar(0.03)
-            ]) * layer_weather;
-            sig = sig + noise;
-
-            drive = pressure.linexp(0, 1, 1, 6.5);
-            sig = (sig * drive).tanh * (1.0 - (pressure * 0.25));
-            bits = pressure.linlin(0, 1, 24, 5).round(1);
-            target_sr = pressure.linexp(0, 1, 48000, 11025);
-            sig = sig.round(0.5 ** bits);
-            sig = Latch.ar(sig, Impulse.ar(target_sr));
-
-            lpf = (base_fc - (p_sq * mod_fc)).clip(35, 20000);
-            rq = base_rq + (p_sq * mod_rq);
-            sig = RLPF.ar(sig, lpf.lag(0.2), rq.clip(0.01, 2.0));
-            sig = sig * (0.95 - (pressure * 0.45));
-
+            // Layer volume attenuates as it gets buried deeper (per your README specs)
             layer_vol = Select.kr(depth, [1.0, 0.5, 0.2, 0.0, 0.0, 0.0]);
 
-            Out.ar(out, sig * v * layer_vol);
+            // Outputs to FX Bus instead of hardware out
+            Out.ar(out, sig * layer_vol);
         }).add;
 
         SynthDef(\InputTracker, { arg in;
@@ -102,21 +108,23 @@ Engine_MemoryPhysics : CroneEngine {
 
         context.server.sync;
 
+        // Ensure proper node ordering: Track -> Record -> Playback -> Monitor -> FX
+        Synth(\InputTracker, [\in, context.in_b[0].index], context.xg);
+        
         synths = Array.fill(maxLayers, { arg i;
-            Synth(\StrataLayer, [\buf, buffers[i], \out, context.out_b.index, \depth, i, \dur_idx, i], context.xg);
+            // Notice \out is now fxBus.index
+            Synth(\StrataLayer, [\buf, buffers[i], \out, fxBus.index, \depth, i, \dur_idx, i], context.xg);
         });
 
-        Synth(\InputTracker, [\in, context.in_b[0].index], context.xg);
+        monitorSynth = Synth(\InputMonitor, [\in, context.in_b[0].index, \out, fxBus.index], context.xg);
+        fxSynth = Synth.after(context.xg, \MasterFX, [\in, fxBus.index, \out, context.out_b.index]);
 
         this.addCommand(\shift_layers, "f", { arg msg;
             var new_dur = msg[1];
-            
             (maxLayers - 1).reverseDo({ arg i;
                 if(i > 0) { buffers[i - 1].copyData(buffers[i]); }
             });
-            
             recBuffer.copyData(buffers[0]);
-            
             (maxLayers - 1).reverseDo({ arg i;
                 if(i > 0) {
                     durations[i] = durations[i - 1];
@@ -130,11 +138,6 @@ Engine_MemoryPhysics : CroneEngine {
         this.addCommand(\clear_layers, "", {
             buffers.do({ arg b; b.zero; });
             recBuffer.zero;
-        });
-
-        this.addCommand(\set_duration, "if", { arg msg;
-            durations[msg[1]] = msg[2];
-            context.server.sendMsg("/c_set", durBus.index + msg[1], msg[2]);
         });
 
         this.addCommand(\record_start, "", {
