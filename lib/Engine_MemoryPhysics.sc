@@ -6,7 +6,6 @@ Engine_MemoryPhysics : CroneEngine {
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
     var <durations;
     
-    // Added chirpSynth tracking variable
     var <fxBus, <fxSynth, <monitorSynth, <bgSynth, <chirpSynth;
     var <ampForwarder, <phaseForwarder, <luaAddr;
 
@@ -103,8 +102,7 @@ Engine_MemoryPhysics : CroneEngine {
             Out.ar(out, noise);
         }).add;
 
-        // 2. NEW: GENERATIVE ENVIRONMENTAL MICRO-CHIRP SYNTH PIPELINE
-        // Translates environmental definitions into structured transient spikes across the biome matrix
+        // 2. GENERATIVE ENVIRONMENTAL MICRO-CHIRP SYNTH PIPELINE
         SynthDef(\EnvChirps, { arg out;
             var w_val, p_val, env_idx, sig;
             var grove_trig, grove_env, grove_freq, grove_sig;
@@ -131,7 +129,8 @@ Engine_MemoryPhysics : CroneEngine {
 
             // --- MOUNTAIN / CAVE: Resonant Crystal Pings / Structural Stress Fractures ---
             cave_trig = Dust.kr(w_val.linlin(0, 1, 0.02, 0.28));
-            cave_env = EnvGen.ar(Env.curve(0.002, 0.35, 1.0, -6), cave_trig);
+            // BUG FIX: Replaced non-existent 'Env.curve' method with native 'Env.perc'
+            cave_env = EnvGen.ar(Env.perc(0.002, 0.35, 1.0, -6), cave_trig);
             cave_freq = TExpRand.kr(900, 2600, cave_trig) * (1.0 - (p_val * 0.3));
             cave_sig = Ringz.ar(PinkNoise.ar(0.004) * cave_env, cave_freq, TRand.kr(0.08, 0.3, cave_trig)) * cave_env * 0.35;
             cave_sig = Pan2.ar(cave_sig, TRand.kr(-0.5, 0.5, cave_trig));
@@ -144,15 +143,14 @@ Engine_MemoryPhysics : CroneEngine {
             swamp_sig = LPF.ar(Saw.ar(TRand.kr(70, 190, swamp_trig) * (1.0 - (p_val * 0.15))), 750) * swamp_env * w_val.linlin(0, 1, 0.0, 0.22);
             swamp_sig = Pan2.ar(swamp_sig, TRand.kr(-0.3, 0.3, swamp_trig));
 
-            // Biome Matrix Router for Micro-Transient Synthesizers
             sig = Select.ar(env_idx % 7, [
-                grove_sig,   // 0: Grove
-                sand_sig,    // 1: Sand
-                cave_sig,    // 2: Mountain
-                grove_sig,   // 3: River Bank
-                sand_sig,    // 4: Sea
-                swamp_sig,   // 5: Swamp
-                cave_sig     // 6: Cave
+                grove_sig,   
+                sand_sig,    
+                cave_sig,    
+                grove_sig,   
+                sand_sig,    
+                swamp_sig,   
+                cave_sig     
             ]);
 
             Out.ar(out, sig);
@@ -288,7 +286,6 @@ Engine_MemoryPhysics : CroneEngine {
 
         monitorSynth = Synth(\InputMonitor, [\in, context.in_b[0].index, \out, fxBus.index], context.xg);
         
-        // Initializing background atmosphere and micro-transient synths to the FX network bus
         bgSynth = Synth(\EnvBackground, [\out, fxBus.index], context.xg);
         chirpSynth = Synth(\EnvChirps, [\out, fxBus.index], context.xg);
         
