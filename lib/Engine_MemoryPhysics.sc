@@ -17,7 +17,6 @@ Engine_MemoryPhysics : CroneEngine {
     }
 
     alloc {
-        // Explicitly target the Norns Lua port for tracking telemetry
         luaAddr = NetAddr("127.0.0.1", 10111);
 
         buffers = Array.fill(maxLayers, {
@@ -42,7 +41,6 @@ Engine_MemoryPhysics : CroneEngine {
         modRqBus = Bus.control(context.server, 1).set(3.0);
         driftBus = Bus.control(context.server, 1).set(0.005);
 
-        // BUG FIX (Bug 3): Intercept server tracking messages and forward them directly to the Lua port
         ampForwarder = OSCFunc({ arg msg;
             luaAddr.sendMsg('/in_amp', msg[3]);
         }, '/in_amp', context.server.addr).fix;
@@ -97,19 +95,21 @@ Engine_MemoryPhysics : CroneEngine {
         SynthDef(\MasterFX, { arg in, out;
             var sig, w_val, p_val, env_idx;
             var localIn, wetSig, delayTime, feedback, mod;
-            var d_lpf, d_hpf;
+            var d_lpf, d_hpf, baseDrive, drive, driveSig;
+            var bits, target_sr, crushSig;
 
             sig = In.ar(in, 2);
             w_val = In.kr(weatherBus.index, 1);
             p_val = In.kr(pressureBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
 
-            delayTime = p_val.linexp(0, 1, 0.12, 1.4).lag(0.4);
-            feedback = w_val.linlin(0, 1, 0.15, 0.82);
+            // BUG FIX: Coupled rain delay intervals directly to Weather instead of Pressure
+            delayTime = w_val.linlin(0, 1, 0.75, 0.32).lag(0.5);
+            feedback = w_val.linlin(0, 1, 0.10, 0.78);
             localIn = LocalIn.ar(2) * feedback;
-            mod = LFDNoise3.kr(w_val.linlin(0, 1, 0.1, 3.0)).range(0.97, 1.03);
+            mod = LFDNoise3.kr(w_val.linlin(0, 1, 0.2, 2.5)).range(0.96, 1.04);
             wetSig = DelayC.ar(sig + localIn, 2.0, (delayTime * mod).clip(0.01, 2.0));
-            wetSig = LPF.ar(wetSig, 4000);
+            wetSig = HPF.ar(LPF.ar(wetSig, 3800), 100);
             LocalOut.ar(wetSig);
 
             sig = Select.ar(Select.kr(env_idx % 7, [1, 0, 0, 1, 0, 1, 1]), [
@@ -119,9 +119,20 @@ Engine_MemoryPhysics : CroneEngine {
 
             d_lpf = Select.kr(env_idx % 7, [6000, 18000, 16000, 5500, 12000, 2500, 3500]);
             d_hpf = Select.kr(env_idx % 7, [40, 150, 200, 50, 80, 30, 100]);
-
             sig = LPF.ar(sig, d_lpf.lag(0.5));
             sig = HPF.ar(sig, d_hpf.lag(0.5));
+
+            // Biome Saturation Scales responsive to Pressure Overrides
+            baseDrive = Select.kr(env_idx % 7, [1.2, 3.5, 5.0, 1.0, 1.1, 1.5, 1.0]);
+            drive = baseDrive + (p_val * 4.0);
+            driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
+            sig = XFade2.ar(sig, driveSig, p_val.linlin(0, 1, -0.4, 1.0));
+
+            // BUG FIX: Isolated downsampling with a clean bypass flag to preserve pure zeros
+            bits = p_val.linlin(0, 1, 24, 6).round(1);
+            target_sr = p_val.linexp(0.001, 1, 48000, 11025);
+            crushSig = Latch.ar(sig.round(0.5 ** bits), Impulse.ar(target_sr));
+            sig = SelectX.ar(p_val > 0, [sig, crushSig]);
 
             Out.ar(out, sig * In.kr(volBus.index, 1));
         }).add;
@@ -137,17 +148,23 @@ Engine_MemoryPhysics : CroneEngine {
             var sig, phase, duration, rate, layer_vol;
             var drift, layer_weather, crackle, seismic_jitter;
             var w_val, w_gate, env_idx, p_override, base_pressure, pressure;
-            var drive, bits, target_sr;
+            var base_fc, mod_fc, base_rq, mod_rq, lpf, rq, p_sq, noise;
+            var drive, bits, target_sr, crushSig, driveSig;
 
             w_val = In.kr(weatherBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
             p_override = In.kr(pressureBus.index, 1);
             duration = In.kr(durBus.index + dur_idx, 1);
             drift = In.kr(driftBus.index, 1);
+            
+            base_fc = In.kr(baseFcBus.index, 1);
+            mod_fc = In.kr(modFcBus.index, 1);
+            base_rq = In.kr(baseRqBus.index, 1);
+            mod_rq = In.kr(modRqBus.index, 1);
 
-            // BUG FIX (Bug 1): Map pressure baseline non-linearly per layer depth directly inside the loop synths
             base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]);
             pressure = (p_override + base_pressure).clip(0, 1);
+            p_sq = pressure * pressure;
 
             w_gate = w_val >= 0.8;
             layer_weather = Select.kr(depth, [
@@ -164,17 +181,28 @@ Engine_MemoryPhysics : CroneEngine {
 
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            // Apply specific geological distortion and decimation algorithms based on layer pressure
+            // BUG FIX: Patched the environment variable name from 'env' to 'env_idx'
+            noise = Select.ar(env_idx % 7, [
+                BrownNoise.ar(0.08), PinkNoise.ar(0.12), WhiteNoise.ar(0.04), 
+                PinkNoise.ar(0.06), WhiteNoise.ar(0.1), BrownNoise.ar(0.15), PinkNoise.ar(0.03)
+            ]) * layer_weather;
+            sig = sig + noise;
+
             drive = Select.kr(env_idx % 7, [1.2, 3.5, 5.0, 1.0, 1.1, 1.5, 1.0]) * pressure.linexp(0, 1, 1, 4);
-            sig = (sig * drive).tanh * (1.0 / (drive.sqrt));
+            driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
+            sig = SelectX.ar(pressure > 0, [sig, driveSig]);
 
             bits = pressure.linlin(0, 1, 24, 6).round(1);
-            target_sr = pressure.linexp(0, 1, 48000, 12000);
-            sig = sig.round(0.5 ** bits);
-            sig = Latch.ar(sig, Impulse.ar(target_sr));
+            target_sr = pressure.linexp(0.001, 1, 48000, 12000);
+            crushSig = Latch.ar(sig.round(0.5 ** bits), Impulse.ar(target_sr));
+            sig = SelectX.ar(pressure > 0, [sig, crushSig]);
+
+            // BUG FIX: Restored original rulebook data-table parameter resonant filter graph
+            lpf = (base_fc - (p_sq * mod_fc)).clip(40, 19500);
+            rq = base_rq + (p_sq * mod_rq);
+            sig = RLPF.ar(sig, lpf.lag(0.3), rq.clip(0.04, 2.0));
 
             layer_vol = Select.kr(depth, [1.0, 0.5, 0.2, 0.0, 0.0, 0.0]);
-
             Out.ar(out, sig * layer_vol);
         }).add;
 
@@ -216,7 +244,6 @@ Engine_MemoryPhysics : CroneEngine {
             context.server.sendMsg("/c_set", durBus.index, new_dur);
         });
 
-        // BUG FIX (Bug 2): Shifting loop data upward deletes the top layer and unburies older ones
         this.addCommand(\erode_layer, "", {
             (maxLayers - 1).do({ arg i;
                 if(i < (maxLayers - 1)) {
