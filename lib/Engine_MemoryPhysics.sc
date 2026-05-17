@@ -81,11 +81,11 @@ Engine_MemoryPhysics : CroneEngine {
             waves = LPF.ar(waves, wav_freq);
             waves = Pan2.ar(waves, wav_pan);
 
-            // Fixed scoping variables here to only look at local scope background signals
+            // Realigned Array order to exactly match Lua: Sand, Mountain, Grove, River Bank, Sea, Swamp, Cave
             noise = Select.ar(env_idx % 7, [
-                breeze * 0.6,    // 0: Grove
-                wind * 0.5,      // 1: Sand
-                wind * 0.8,      // 2: Mountain
+                wind * 0.5,      // 0: Sand
+                wind * 0.8,      // 1: Mountain
+                breeze * 0.6,    // 2: Grove
                 breeze * 0.5,    // 3: River Bank
                 waves * 0.8,     // 4: Sea
                 breeze * 0.4,    // 5: Swamp
@@ -124,10 +124,11 @@ Engine_MemoryPhysics : CroneEngine {
             swamp_sig = LPF.ar(Saw.ar(TRand.kr(70, 190, swamp_trig) * (1.0 - (p_val * 0.15))), 750) * swamp_env * e_val.linlin(0.01, 1, 0.0, 0.22);
             swamp_sig = Pan2.ar(swamp_sig, TRand.kr(-0.3, 0.3, swamp_trig));
 
+            // Realigned Array order to match Lua list configuration exactly
             sig = Select.ar(env_idx % 7, [
-                grove_sig,      // 0: Grove
-                Silent.ar(2),   // 1: Sand
-                Silent.ar(2),   // 2: Mountain
+                Silent.ar(2),   // 0: Sand
+                Silent.ar(2),   // 1: Mountain
+                grove_sig,      // 2: Grove
                 grove_sig,      // 3: River Bank
                 Silent.ar(2),   // 4: Sea
                 swamp_sig,      // 5: Swamp
@@ -159,16 +160,19 @@ Engine_MemoryPhysics : CroneEngine {
             wetSig = Limiter.ar(wetSig, 0.95, 0.02);
             LocalOut.ar(wetSig);
 
-            sig = Select.ar(Select.kr(env_idx % 7, [1, 0, 0, 1, 0, 1, 1]), [
+            // Realigned Toggle Delay Array to match Lua biome indexing list
+            sig = Select.ar(Select.kr(env_idx % 7, [0, 0, 1, 1, 0, 1, 1]), [
                 sig, XFade2.ar(sig, wetSig, w_val * 2 - 1)
             ]);
 
-            d_lpf = Select.kr(env_idx % 7, [6000, 18000, 16000, 5500, 12000, 2500, 3500]);
-            d_hpf = Select.kr(env_idx % 7, [40, 150, 200, 50, 80, 30, 100]);
+            // Realigned low pass filter configuration boundary array to match Lua
+            d_lpf = Select.kr(env_idx % 7, [18000, 16000, 6000, 5500, 12000, 2500, 3500]);
+            d_hpf = Select.kr(env_idx % 7, [150, 200, 40, 50, 80, 30, 100]);
             sig = LPF.ar(sig, d_lpf.lag(0.5));
             sig = HPF.ar(sig, d_hpf.lag(0.5));
 
-            baseDrive = Select.kr(env_idx % 7, [1.2, 3.5, 5.0, 1.0, 1.1, 1.5, 1.0]);
+            // Realigned Drive values to match Lua biome order
+            baseDrive = Select.kr(env_idx % 7, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0]);
             drive = baseDrive + (p_val * 4.0);
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = XFade2.ar(sig, driveSig, p_val.linlin(0, 1, -0.4, 1.0));
@@ -224,7 +228,8 @@ Engine_MemoryPhysics : CroneEngine {
             
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            drive = Select.kr(env_idx % 7, [1.2, 3.5, 5.0, 1.0, 1.1, 1.5, 1.0]) * pressure.linexp(0, 1, 1, 4);
+            // Realigned Drive select array mapping to match Lua order
+            drive = Select.kr(env_idx % 7, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0]) * pressure.linexp(0, 1, 1, 4);
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = SelectX.ar(pressure > 0, [sig, driveSig]);
 
@@ -233,9 +238,10 @@ Engine_MemoryPhysics : CroneEngine {
             wobble = LFDNoise3.ar(wobbleRate, wobbleDepth);
             sig = DelayC.ar(sig, 0.02, 0.01 + wobble);
 
-            lpf = (base_fc - (p_sq * mod_fc)).clip(40, 19500);
+            // CRITICAL PROTECTION: Safe clipping bound relative to Nyquist and replaced RLPF with ultra-stable BLowPass
+            lpf = (base_fc - (p_sq * mod_fc)).clip(40, SampleRate.ir * 0.45);
             rq = base_rq + (p_sq * mod_rq);
-            sig = RLPF.ar(sig, lpf.lag(0.3), rq.clip(0.1, 2.0));
+            sig = BLowPass.ar(sig, lpf.lag(0.3), rq.clip(0.05, 2.0));
             sig = LeakDC.ar(sig);
 
             layer_vol = Select.kr(depth, [1.0, 0.5, 0.2, 0.0, 0.0, 0.0]).lag(fade_time);
@@ -312,7 +318,6 @@ Engine_MemoryPhysics : CroneEngine {
         this.addCommand(\set_env, "i", { arg msg; envBus.set(msg[1]); });
         this.addCommand(\set_volume, "f", { arg msg; volBus.set(msg[1]); });
         
-        // Fixed syntax error: change base_rqBus to baseRqBus
         this.addCommand(\set_environment_params, "fffff", { arg msg;
             baseFcBus.set(msg[1]); modFcBus.set(msg[2]); baseRqBus.set(msg[3]); modRqBus.set(msg[4]); driftBus.set(msg[5]);
         });
