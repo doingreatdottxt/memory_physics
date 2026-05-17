@@ -39,7 +39,6 @@ Engine_MemoryPhysics : CroneEngine {
         driftBus = Bus.control(context.server, 1).set(0.005);
 
         // 1. GENERATIVE ENVIRONMENTAL BACKGROUND AMBIENCE SYNTH
-        // Handles "Breeze", "Wind", and "Waves" structural rules from the top of the specification list
         SynthDef(\EnvBackground, { arg out;
             var w_val, env_idx, noise, breeze, wind, waves;
             var b_env, w_env, wav_env, trigger_rate, gate_b, gate_w, gate_wav;
@@ -58,13 +57,13 @@ Engine_MemoryPhysics : CroneEngine {
             w_env = EnvGen.kr(Env.asr(0.40, 0.45, 0.15, \sin), gate_w);
             wav_env = EnvGen.kr(Env.asr(0.25, 0.40, 0.35, \sin), gate_wav);
 
-            // Audio Asset Synthesis Pipelines
+            // BUG FIX: Swapped out non-existent 'BPFilter' classes with native 'BPF' core classes
             breeze = PinkNoise.ar(w_val.linlin(0, 1, 0.01, 0.04)) * b_env;
-            breeze = BPFilter.ar(breeze, LFNoise1.kr(0.5).exprange(800, 2400), 0.3);
+            breeze = BPF.ar(breeze, LFNoise1.kr(0.5).exprange(800, 2400), 0.3);
             breeze = Pan2.ar(breeze, LFNoise1.kr(0.2));
 
             wind = PinkNoise.ar(w_val.linlin(0, 1, 0.02, 0.08)) * w_env;
-            wind = BPFilter.ar(wind, LFNoise1.kr(0.3).exprange(400, 1600), 0.4);
+            wind = BPF.ar(wind, LFNoise1.kr(0.3).exprange(400, 1600), 0.4);
             wind = Pan2.ar(wind, LFNoise1.kr(0.1));
 
             waves = WhiteNoise.ar(w_val.linlin(0, 1, 0.03, 0.12)) * wav_env;
@@ -86,12 +85,10 @@ Engine_MemoryPhysics : CroneEngine {
         }).add;
 
         // 2. MASTER SITE EFFECTS SYNTH PIPELINE
-        // Intercepts loop layers and incoming monitors through unified climate logic modifiers
         SynthDef(\MasterFX, { arg in, out;
             var sig, w_val, p_val, env_idx;
             var localIn, wetSig, delayTime, feedback, mod;
             var d_lpf, d_hpf, drive, bits, target_sr;
-            var w_gate, layer2_weather;
 
             sig = In.ar(in, 2);
             w_val = In.kr(weatherBus.index, 1);
@@ -199,9 +196,11 @@ Engine_MemoryPhysics : CroneEngine {
             Out.ar(out, sig * layer_vol);
         }).add;
 
+        // OPTIMIZATION FIX: Rewrote tracker math to avoid generic Mix.ar compilation warnings
         SynthDef(\InputTracker, { arg in;
             var input_signal = In.ar(in, 2);
-            SendReply.kr(Impulse.kr(15), '/in_amp', [Amplitude.kr(Mix.ar(input_signal))], 999);
+            var mono_sum = (input_signal[0] + input_signal[1]) * 0.5;
+            SendReply.kr(Impulse.kr(15), '/in_amp', [Amplitude.kr(mono_sum)], 999);
         }).add;
 
         SynthDef(\SurfaceRecorder, { arg buf, in;
