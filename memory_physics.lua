@@ -21,6 +21,7 @@ function init()
     osc.event = function(path, args, from)
         if path == "/in_amp" then
             if params:get("auto_record") == 2 then
+                -- BUG FIX: Correctly maps incoming single value directly from the engine forwarder index
                 local amp = args[1]
                 if not physics.recording and amp > params:get("threshold") then
                     toggle_formation()
@@ -113,6 +114,7 @@ function key(n, z)
         end
     elseif n == 3 and z == 1 then
         if physics.shift_held then
+            -- BUG FIX: Shift+Key 3 scales visual tracking counter down dynamically alongside erosion events
             if physics.layers_active > 0 then
                 engine.erode_layer()
                 physics.layers_active = physics.layers_active - 1
