@@ -250,8 +250,8 @@ Engine_MemoryPhysics : CroneEngine {
             var mono_sum = (input_signal[0] + input_signal[1]) * 0.5;
             var fft_frame = FFT(LocalBuf(512), mono_sum);
             
-            // Fast RFFT spectral flux detection for precise percussive/melodic tracking
-            var onset_trigger = Onsets.kr(fft_frame, threshold: 0.22, odftype: \rfft);
+            // FIXED: Avoid mixed positional/keyword bindings to completely remove compilation crash risks
+            var onset_trigger = Onsets.kr(fft_frame, 0.22, \rfft, 1, 0.1, 10, 11, 1, 0);
             
             SendReply.kr(Impulse.kr(15), '/in_amp', [Amplitude.kr(mono_sum)], 999);
             SendReply.kr(onset_trigger, '/audio_onset', [1.0], 997);
@@ -306,6 +306,12 @@ Engine_MemoryPhysics : CroneEngine {
             context.server.sendMsg("/c_set", durBus.index + msg[1], msg[2]);
         });
 
+        this.addCommand(\set_env_intensity, "f", { arg msg; envIntBus.set(msg[1]); });
+        this.addCommand(\set_weather, "f", { arg msg; weatherBus.set(msg[1]); });
+        this.addCommand(\set_pressure, "f", { arg msg; pressureBus.set(msg[1]); });
+        this.addCommand(\set_env, "i", { arg msg; envBus.set(msg[1]); });
+        this.addCommand(\set_volume, "f", { arg msg; volBus.set(msg[1]); });
+        
         this.addCommand(\record_start, "", {
             recBuffer.zero;
             recSynth = Synth(\SurfaceRecorder, [\buf, recBuffer, \in, context.in_b[0].index], context.xg);
@@ -315,12 +321,6 @@ Engine_MemoryPhysics : CroneEngine {
             recSynth.free;
         });
 
-        this.addCommand(\set_env_intensity, "f", { arg msg; envIntBus.set(msg[1]); });
-        this.addCommand(\set_weather, "f", { arg msg; weatherBus.set(msg[1]); });
-        this.addCommand(\set_pressure, "f", { arg msg; pressureBus.set(msg[1]); });
-        this.addCommand(\set_env, "i", { arg msg; envBus.set(msg[1]); });
-        this.addCommand(\set_volume, "f", { arg msg; volBus.set(msg[1]); });
-        
         this.addCommand(\set_environment_params, "fffff", { arg msg;
             baseFcBus.set(msg[1]); modFcBus.set(msg[2]); baseRqBus.set(msg[3]); modRqBus.set(msg[4]); driftBus.set(msg[5]);
         });
