@@ -6,10 +6,7 @@ Engine_MemoryPhysics : CroneEngine {
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
     var <durations;
     
-    // Global FX and Background Ambient Asset Routing Buses
     var <fxBus, <fxSynth, <monitorSynth, <bgSynth;
-    
-    // Language-side OSC forwarders to bridge communication with Norns Lua
     var <ampForwarder, <phaseForwarder, <luaAddr;
 
     *new { arg context, doneCallback;
@@ -103,7 +100,6 @@ Engine_MemoryPhysics : CroneEngine {
             p_val = In.kr(pressureBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
 
-            // BUG FIX: Coupled rain delay intervals directly to Weather instead of Pressure
             delayTime = w_val.linlin(0, 1, 0.75, 0.32).lag(0.5);
             feedback = w_val.linlin(0, 1, 0.10, 0.78);
             localIn = LocalIn.ar(2) * feedback;
@@ -122,13 +118,11 @@ Engine_MemoryPhysics : CroneEngine {
             sig = LPF.ar(sig, d_lpf.lag(0.5));
             sig = HPF.ar(sig, d_hpf.lag(0.5));
 
-            // Biome Saturation Scales responsive to Pressure Overrides
             baseDrive = Select.kr(env_idx % 7, [1.2, 3.5, 5.0, 1.0, 1.1, 1.5, 1.0]);
             drive = baseDrive + (p_val * 4.0);
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = XFade2.ar(sig, driveSig, p_val.linlin(0, 1, -0.4, 1.0));
 
-            // BUG FIX: Isolated downsampling with a clean bypass flag to preserve pure zeros
             bits = p_val.linlin(0, 1, 24, 6).round(1);
             target_sr = p_val.linexp(0.001, 1, 48000, 11025);
             crushSig = Latch.ar(sig.round(0.5 ** bits), Impulse.ar(target_sr));
@@ -181,7 +175,6 @@ Engine_MemoryPhysics : CroneEngine {
 
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            // BUG FIX: Patched the environment variable name from 'env' to 'env_idx'
             noise = Select.ar(env_idx % 7, [
                 BrownNoise.ar(0.08), PinkNoise.ar(0.12), WhiteNoise.ar(0.04), 
                 PinkNoise.ar(0.06), WhiteNoise.ar(0.1), BrownNoise.ar(0.15), PinkNoise.ar(0.03)
@@ -197,7 +190,6 @@ Engine_MemoryPhysics : CroneEngine {
             crushSig = Latch.ar(sig.round(0.5 ** bits), Impulse.ar(target_sr));
             sig = SelectX.ar(pressure > 0, [sig, crushSig]);
 
-            // BUG FIX: Restored original rulebook data-table parameter resonant filter graph
             lpf = (base_fc - (p_sq * mod_fc)).clip(40, 19500);
             rq = base_rq + (p_sq * mod_rq);
             sig = RLPF.ar(sig, lpf.lag(0.3), rq.clip(0.04, 2.0));
@@ -228,30 +220,30 @@ Engine_MemoryPhysics : CroneEngine {
         bgSynth = Synth(\EnvBackground, [\out, fxBus.index], context.xg);
         fxSynth = Synth.after(context.xg, \MasterFX, [\in, fxBus.index, \out, context.out_b.index]);
 
+        // BUG FIX: Rewrote loop offsets to correctly shift all 6 layers downward without truncation
         this.addCommand(\shift_layers, "f", { arg msg;
             var new_dur = msg[1];
             (maxLayers - 1).reverseDo({ arg i;
-                if(i > 0) { buffers[i - 1].copyData(buffers[i]); }
+                var dest = i + 1;
+                var src = i;
+                buffers[src].copyData(buffers[dest]);
+                durations[dest] = durations[src];
+                context.server.sendMsg("/c_set", durBus.index + dest, durations[dest]);
             });
+            
             recBuffer.copyData(buffers[0]);
-            (maxLayers - 1).reverseDo({ arg i;
-                if(i > 0) {
-                    durations[i] = durations[i - 1];
-                    context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
-                }
-            });
             durations[0] = new_dur;
             context.server.sendMsg("/c_set", durBus.index, new_dur);
         });
 
+        // BUG FIX: Cleared destination-erasing race condition to allow loops to cleanly unbury/re-emerge
         this.addCommand(\erode_layer, "", {
             (maxLayers - 1).do({ arg i;
-                if(i < (maxLayers - 1)) {
-                    buffers[i].zero;
-                    buffers[i + 1].copyData(buffers[i]);
-                    durations[i] = durations[i + 1];
-                    context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
-                }
+                var dest = i;
+                var src = i + 1;
+                buffers[src].copyData(buffers[dest]);
+                durations[dest] = durations[src];
+                context.server.sendMsg("/c_set", durBus.index + dest, durations[dest]);
             });
             buffers[maxLayers - 1].zero;
             durations[maxLayers - 1] = 2.0;
