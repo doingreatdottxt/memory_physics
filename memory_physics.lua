@@ -18,11 +18,9 @@ local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 function init()
     setup_params()
 
-    -- Unified receiver handles bridged loopback tracking data from SuperCollider
     osc.event = function(path, args, from)
         if path == "/in_amp" then
             if params:get("auto_record") == 2 then
-                -- BUG FIX (Bug 3): Array is isolated during forwarding, mapping directly to index 1
                 local amp = args[1]
                 if not physics.recording and amp > params:get("threshold") then
                     toggle_formation()
@@ -104,7 +102,6 @@ function toggle_formation()
     end
 end
 
--- CONTROLS
 function key(n, z)
     if n == 1 then
         physics.shift_held = (z == 1)
@@ -116,7 +113,6 @@ function key(n, z)
         end
     elseif n == 3 and z == 1 then
         if physics.shift_held then
-            -- BUG FIX (Bug 2): Shift+Key 3 processes an erosion single-layer pop event to lift buried layers back up
             if physics.layers_active > 0 then
                 engine.erode_layer()
                 physics.layers_active = physics.layers_active - 1
@@ -137,17 +133,14 @@ function enc(n, d)
     end
 end
 
--- VISUALS
 function redraw()
     screen.clear()
 
-    -- Header Layout
     screen.level(physics.recording and 15 or 3)
     screen.move(0, 8)
     local status = physics.recording and "FORMING STRATA" or "STABLE"
     screen.text(status .. " [" .. string.format("%.1f", physics.duration) .. "s]")
 
-    -- Center Layout: Geological Strata Stack Display
     local current_env = envs.list[params:get("environment")]
     for i = 1, 6 do
         local y = 14 + (i * 7)
@@ -195,7 +188,6 @@ function redraw()
         end
     end
 
-    -- Footer Layout
     screen.level(3)
     screen.move(0, 62)
     screen.text(current_env .. " | W:" .. math.floor(params:get("weather") * 100) .. "% P:" .. math.floor(params:get("pressure") * 100) .. "%")
