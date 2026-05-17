@@ -15,7 +15,6 @@ Engine_MemoryPhysics : CroneEngine {
     alloc {
         luaAddr = NetAddr("127.0.0.1", 10111);
         
-        // Dynamic Allocation Constraint: Strict 10-second maximum stereo loop buffers
         buffers = Array.fill(maxLayers, { Buffer.alloc(context.server, context.server.sampleRate * 10.0, 2); });
         recBuffer = Buffer.alloc(context.server, context.server.sampleRate * 10.0, 2);
 
@@ -40,8 +39,6 @@ Engine_MemoryPhysics : CroneEngine {
 
         ampForwarder = OSCFunc({ arg msg; luaAddr.sendMsg('/in_amp', msg[3]); }, '/in_amp', context.server.addr).fix;
         phaseForwarder = OSCFunc({ arg msg; luaAddr.sendMsg('/layer_phase', msg[3], msg[4]); }, '/layer_phase', context.server.addr).fix;
-        
-        // OSC Forwarder for real-time transient rhythm metrics
         onsetForwarder = OSCFunc({ arg msg; luaAddr.sendMsg('/audio_onset'); }, '/audio_onset', context.server.addr).fix;
 
         // 1. GENERATIVE ENVIRONMENTAL BACKGROUND AMBIENCE SYNTH
@@ -84,15 +81,15 @@ Engine_MemoryPhysics : CroneEngine {
             waves = LPF.ar(waves, wav_freq);
             waves = Pan2.ar(waves, wav_pan);
 
-            // Audio rate conversion fixes Mix.kr signal degradation warnings
-            noise = Select.ar(K2A.ar(env_idx % 7), [
+            noise = Select.ar(K2A.ar(env_idx % 8), [
                 wind * 0.5,      // 0: Sand
                 wind * 0.8,      // 1: Mountain
                 breeze * 0.6,    // 2: Grove
                 breeze * 0.5,    // 3: River Bank
                 waves * 0.8,     // 4: Sea
                 breeze * 0.4,    // 5: Swamp
-                Silent.ar(2)     // 6: Cave
+                Silent.ar(2),    // 6: Cave
+                Silent.ar(2)     // 7: Void (Bypassed)
             ]);
             Out.ar(out, noise);
         }).add;
@@ -127,14 +124,15 @@ Engine_MemoryPhysics : CroneEngine {
             swamp_sig = LPF.ar(Saw.ar(TRand.kr(70, 190, swamp_trig) * (1.0 - (p_val * 0.15))), 750) * swamp_env * e_val.linlin(0.01, 1, 0.0, 0.22);
             swamp_sig = Pan2.ar(swamp_sig, TRand.kr(-0.3, 0.3, swamp_trig));
 
-            sig = Select.ar(K2A.ar(env_idx % 7), [
+            sig = Select.ar(K2A.ar(env_idx % 8), [
                 Silent.ar(2),   // 0: Sand
                 Silent.ar(2),   // 1: Mountain
                 grove_sig,      // 2: Grove
                 grove_sig,      // 3: River Bank
                 Silent.ar(2),   // 4: Sea
                 swamp_sig,      // 5: Swamp
-                cave_sig        // 6: Cave
+                cave_sig,       // 6: Cave
+                Silent.ar(2)    // 7: Void (Bypassed)
             ]);
             Out.ar(out, sig);
         }).add;
@@ -162,16 +160,16 @@ Engine_MemoryPhysics : CroneEngine {
             wetSig = Limiter.ar(wetSig, 0.95, 0.02);
             LocalOut.ar(wetSig);
 
-            sig = Select.ar(K2A.ar(Select.kr(env_idx % 7, [0, 0, 1, 1, 0, 1, 1])), [
+            sig = Select.ar(K2A.ar(Select.kr(env_idx % 8, [0, 0, 1, 1, 0, 1, 1, 0])), [
                 sig, XFade2.ar(sig, wetSig, w_val * 2 - 1)
             ]);
 
-            d_lpf = Select.kr(env_idx % 7, [18000, 16000, 6000, 5500, 12000, 2500, 3500]);
-            d_hpf = Select.kr(env_idx % 7, [150, 200, 40, 50, 80, 30, 100]);
+            d_lpf = Select.kr(env_idx % 8, [18000, 16000, 6000, 5500, 12000, 2500, 3500, 20000]);
+            d_hpf = Select.kr(env_idx % 8, [150, 200, 40, 50, 80, 30, 100, 10]);
             sig = LPF.ar(sig, d_lpf.lag(0.5));
             sig = HPF.ar(sig, d_hpf.lag(0.5));
 
-            baseDrive = Select.kr(env_idx % 7, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0]);
+            baseDrive = Select.kr(env_idx % 8, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0, 1.0]);
             drive = baseDrive + (p_val * 4.0);
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = XFade2.ar(sig, driveSig, p_val.linlin(0, 1, -0.4, 1.0));
@@ -212,8 +210,6 @@ Engine_MemoryPhysics : CroneEngine {
             mod_rq = In.kr(modRqBus.index, 1);
 
             base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]).lag(fade_time);
-            
-            // Mask pressure with (depth > 0) so the top surface layer is never altered
             pressure = ((p_override + base_pressure) * (depth > 0)).clip(0, 1);
             p_sq = pressure * pressure;
 
@@ -229,7 +225,7 @@ Engine_MemoryPhysics : CroneEngine {
             
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / (duration * BufSampleRate.kr(buf))], 998);
 
-            drive = Select.kr(env_idx % 7, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0]) * pressure.linexp(0, 1, 1, 4);
+            drive = Select.kr(env_idx % 8, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0, 1.0]) * pressure.linexp(0, 1, 1, 4);
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = SelectX.ar(pressure > 0, [sig, driveSig]);
 
@@ -238,7 +234,6 @@ Engine_MemoryPhysics : CroneEngine {
             wobble = LFDNoise3.ar(wobbleRate, wobbleDepth);
             sig = DelayC.ar(sig, 0.02, 0.01 + wobble);
 
-            // Safe clipping ceiling combined with highly stable pass filters prevents "Sand" overloads
             lpf = (base_fc - (p_sq * mod_fc)).clip(40, SampleRate.ir * 0.45);
             rq = base_rq + (p_sq * mod_rq);
             sig = BLowPass.ar(sig, lpf.lag(0.3), rq.clip(0.05, 2.0));
@@ -248,13 +243,11 @@ Engine_MemoryPhysics : CroneEngine {
             Out.ar(out, sig * layer_vol);
         }).add;
 
-        // 6. TRACKER ENGINE WITH SPECTRAL TRANSIENT DETECTION
+        // 6. TRACKER ENGINE
         SynthDef(\InputTracker, { arg in;
             var input_signal = In.ar(in, 2);
             var mono_sum = (input_signal[0] + input_signal[1]) * 0.5;
             var fft_frame = FFT(LocalBuf(512), mono_sum);
-            
-            // Fixed class instantiation style removes standard dictionary compiler parsing bugs
             var onset_trigger = Onsets.kr(fft_frame, 0.22);
             
             SendReply.kr(Impulse.kr(15), '/in_amp', [Amplitude.kr(mono_sum)], 999);
@@ -263,7 +256,6 @@ Engine_MemoryPhysics : CroneEngine {
 
         // 7. SURFACE RECORDING ENGINE
         SynthDef(\SurfaceRecorder, { arg buf, in;
-            // doneAction: 0 holds the node layout intact for synchronous teardowns via Lua
             RecordBuf.ar(In.ar(in, 2), buf, recLevel: 1.0, preLevel: 0.0, loop: 0, doneAction: 0);
         }).add;
 
