@@ -16,6 +16,7 @@ Engine_MemoryPhysics : CroneEngine {
     alloc {
         luaAddr = NetAddr("127.0.0.1", 10111);
 
+        // Stationary Buffer Array - allocated hardware instances never swap indices
         buffers = Array.fill(maxLayers, {
             Buffer.alloc(context.server, context.server.sampleRate * 20, 2);
         });
@@ -220,45 +221,35 @@ Engine_MemoryPhysics : CroneEngine {
         bgSynth = Synth(\EnvBackground, [\out, fxBus.index], context.xg);
         fxSynth = Synth.after(context.xg, \MasterFX, [\in, fxBus.index, \out, context.out_b.index]);
 
-        // BUG FIX: Rewrote shift operations as instantaneous allocation pointer swaps to fix server race conditions
+        // REVERT FIX: Back to stationary block copy mechanics to protect running clocks and phasor alignment
         this.addCommand(\shift_layers, "f", { arg msg;
             var new_dur = msg[1];
-            var oldLastBuffer = buffers[maxLayers - 1];
-
+            
+            // Push audio sample arrays down sequentially
             (maxLayers - 2).reverseDo({ arg i;
-                buffers[i + 1] = buffers[i];
+                buffers[i].copyData(buffers[i + 1]);
                 durations[i + 1] = durations[i];
+                context.server.sendMsg("/c_set", durBus.index + i + 1, durations[i + 1]);
             });
             
-            buffers[0] = recBuffer;
+            // Print freshly captured isolate buffer cleanly to top layer slot
+            recBuffer.copyData(buffers[0]);
             durations[0] = new_dur;
-            
-            recBuffer = oldLastBuffer;
-            recBuffer.zero;
-
-            maxLayers.do({ arg i;
-                synths[i].set(\buf, buffers[i]);
-                context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
-            });
+            context.server.sendMsg("/c_set", durBus.index, new_dur);
         });
 
-        // BUG FIX: Rewrote erosion operations using language-side pointers to guarantee smooth unburial/re-emergence
+        // REVERT FIX: Back to raw forward-copy data migration to support automated structural unburial
         this.addCommand(\erode_layer, "", {
-            var oldFirstBuffer = buffers[0];
-
             (maxLayers - 1).do({ arg i;
-                buffers[i] = buffers[i + 1];
+                buffers[i + 1].copyData(buffers[i]);
                 durations[i] = durations[i + 1];
-            });
-            
-            buffers[maxLayers - 1] = oldFirstBuffer;
-            buffers[maxLayers - 1].zero;
-            durations[maxLayers - 1] = 2.0;
-
-            maxLayers.do({ arg i;
-                synths[i].set(\buf, buffers[i]);
                 context.server.sendMsg("/c_set", durBus.index + i, durations[i]);
             });
+            
+            // Erase trailing layer block at end of operations to prevent trailing echoes
+            buffers[maxLayers - 1].zero;
+            durations[maxLayers - 1] = 2.0;
+            context.server.sendMsg("/c_set", durBus.index + (maxLayers - 1), 2.0);
         });
 
         this.addCommand(\clear_layers, "", {
