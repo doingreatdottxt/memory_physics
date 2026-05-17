@@ -36,6 +36,7 @@ local state = {
 }
 
 local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+local redraw_metro  -- Explicit local declaration isolates execution environment paths
 
 function init()
   setup_params()
@@ -268,6 +269,12 @@ function enc(n, d)
     params:delta("weather", d)
   elseif n == 3 then
     params:delta("pressure", d)
+  end
+end
+
+function cleanup()
+  if redraw_metro then
+    redraw_metro:stop()
   end
 end
 
