@@ -18,11 +18,12 @@ local layer_phases = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 function init()
     setup_params()
 
-    -- Standard global hook matches standard norns firmware behaviors perfectly
+    -- Unified receiver handles bridged loopback tracking data from SuperCollider
     osc.event = function(path, args, from)
         if path == "/in_amp" then
             if params:get("auto_record") == 2 then
-                local amp = args[3]
+                -- BUG FIX (Bug 3): Array is isolated during forwarding, mapping directly to index 1
+                local amp = args[1]
                 if not physics.recording and amp > params:get("threshold") then
                     toggle_formation()
                 elseif physics.recording then
@@ -38,8 +39,8 @@ function init()
                 end
             end
         elseif path == "/layer_phase" then
-            local layer_idx = math.floor(args[3] + 1)
-            local phase_val = args[4]
+            local layer_idx = math.floor(args[1] + 1)
+            local phase_val = args[2]
             if layer_idx >= 1 and layer_idx <= physics.max_layers then
                 layer_phases[layer_idx] = phase_val
             end
@@ -98,7 +99,6 @@ function toggle_formation()
         physics.duration = math.max(0.5, util.time() - physics.start_time)
         engine.record_stop()
         
-        -- Safely pushes layers down and cleanly prints to surface loop buffer
         engine.shift_layers(physics.duration)
         physics.layers_active = math.min(physics.max_layers, physics.layers_active + 1)
     end
@@ -116,7 +116,11 @@ function key(n, z)
         end
     elseif n == 3 and z == 1 then
         if physics.shift_held then
-            params:set("excavate", 1)
+            -- BUG FIX (Bug 2): Shift+Key 3 processes an erosion single-layer pop event to lift buried layers back up
+            if physics.layers_active > 0 then
+                engine.erode_layer()
+                physics.layers_active = physics.layers_active - 1
+            end
         else
             params:set("auto_record", params:get("auto_record") == 1 and 2 or 1)
         end
