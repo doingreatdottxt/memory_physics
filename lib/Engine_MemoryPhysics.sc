@@ -81,14 +81,15 @@ Engine_MemoryPhysics : CroneEngine {
             waves = LPF.ar(waves, wav_freq);
             waves = Pan2.ar(waves, wav_pan);
 
+            // Fixed scoping variables here to only look at local scope background signals
             noise = Select.ar(env_idx % 7, [
                 breeze * 0.6,    // 0: Grove
-                Silent.ar(2),    // 1: Sand
-                Silent.ar(2),    // 2: Mountain
-                grove_sig,       // 3: River Bank
-                Silent.ar(2),    // 4: Sea
-                swamp_sig,       // 5: Swamp
-                cave_sig         // 6: Cave
+                wind * 0.5,      // 1: Sand
+                wind * 0.8,      // 2: Mountain
+                breeze * 0.5,    // 3: River Bank
+                waves * 0.8,     // 4: Sea
+                breeze * 0.4,    // 5: Swamp
+                Silent.ar(2)     // 6: Cave
             ]);
             Out.ar(out, noise);
         }).add;
@@ -218,7 +219,6 @@ Engine_MemoryPhysics : CroneEngine {
             seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
             rate = 1.0 + (SinOsc.kr(drift * 25) * (layer_weather * drift)) + seismic_jitter;
             
-            // Loop boundaries handle dynamically calculated frame points precisely
             phase = Phasor.ar(0, BufRateScale.kr(buf) * rate, 0, duration * BufSampleRate.kr(buf));
             sig = BufRd.ar(2, buf, phase, loop: 1);
             
@@ -311,8 +311,10 @@ Engine_MemoryPhysics : CroneEngine {
         this.addCommand(\set_pressure, "f", { arg msg; pressureBus.set(msg[1]); });
         this.addCommand(\set_env, "i", { arg msg; envBus.set(msg[1]); });
         this.addCommand(\set_volume, "f", { arg msg; volBus.set(msg[1]); });
+        
+        // Fixed syntax error: change base_rqBus to baseRqBus
         this.addCommand(\set_environment_params, "fffff", { arg msg;
-            baseFcBus.set(msg[1]); modFcBus.set(msg[2]); base_rqBus.set(msg[3]); modRqBus.set(msg[4]); driftBus.set(msg[5]);
+            baseFcBus.set(msg[1]); modFcBus.set(msg[2]); baseRqBus.set(msg[3]); modRqBus.set(msg[4]); driftBus.set(msg[5]);
         });
     }
 
