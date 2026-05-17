@@ -6,7 +6,7 @@ Engine_MemoryPhysics : CroneEngine {
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
     var <durations, <synthDepths;
     var <fxBus, <fxSynth, <monitorSynth, <bgSynth, <chirpSynth;
-    var <ampForwarder, <phaseForwarder, <luaAddr;
+    var <ampForwarder, <phaseForwarder, <onsetForwarder, <luaAddr;
 
     *new { arg context, doneCallback;
         ^super.new(context, doneCallback);
@@ -40,6 +40,9 @@ Engine_MemoryPhysics : CroneEngine {
 
         ampForwarder = OSCFunc({ arg msg; luaAddr.sendMsg('/in_amp', msg[3]); }, '/in_amp', context.server.addr).fix;
         phaseForwarder = OSCFunc({ arg msg; luaAddr.sendMsg('/layer_phase', msg[3], msg[4]); }, '/layer_phase', context.server.addr).fix;
+        
+        // OSC Forwarder for real-time transient rhythm metrics
+        onsetForwarder = OSCFunc({ arg msg; luaAddr.sendMsg('/audio_onset'); }, '/audio_onset', context.server.addr).fix;
 
         // 1. GENERATIVE ENVIRONMENTAL BACKGROUND AMBIENCE SYNTH
         SynthDef(\EnvBackground, { arg out;
@@ -208,8 +211,6 @@ Engine_MemoryPhysics : CroneEngine {
             mod_rq = In.kr(modRqBus.index, 1);
 
             base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]).lag(fade_time);
-            
-            // ADJUSTMENT: Mask pressure with (depth > 0) so surface layer (depth == 0) remains completely unaffected
             pressure = ((p_override + base_pressure) * (depth > 0)).clip(0, 1);
             p_sq = pressure * pressure;
 
@@ -243,10 +244,17 @@ Engine_MemoryPhysics : CroneEngine {
             Out.ar(out, sig * layer_vol);
         }).add;
 
+        // 6. TRACKER ENGINE WITH SPECTRAL TRANSIENT DETECTION
         SynthDef(\InputTracker, { arg in;
             var input_signal = In.ar(in, 2);
             var mono_sum = (input_signal[0] + input_signal[1]) * 0.5;
+            var fft_frame = FFT(LocalBuf(512), mono_sum);
+            
+            // Fast RFFT spectral flux detection for precise percussive/melodic tracking
+            var onset_trigger = Onsets.kr(fft_frame, threshold: 0.22, odftype: \rfft);
+            
             SendReply.kr(Impulse.kr(15), '/in_amp', [Amplitude.kr(mono_sum)], 999);
+            SendReply.kr(onset_trigger, '/audio_onset', [1.0], 997);
         }).add;
 
         SynthDef(\SurfaceRecorder, { arg buf, in;
@@ -321,6 +329,7 @@ Engine_MemoryPhysics : CroneEngine {
     free {
         ampForwarder.free;
         phaseForwarder.free;
+        onsetForwarder.free;
         buffers.do({ arg b; b.free; });
         recBuffer.free;
         fxBus.free;
