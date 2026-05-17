@@ -50,7 +50,7 @@ Listen for input above background noise threshold. Use live continuous recording
 
 ***Control scheme - 
 
-Key 1 - Shift Key 2 - form / bury (records new top layer and burries previous top layer on completion). Key 3 - Toggle Automatic recording mode on/off (on by default) Shift + key 2 - Cycle "Environment" Shift + key 3 - Excavate (Clears all active layers) Encoder 1 - global volume Encoder 2 - Weather intensity (20% at boot) Encoder 3 - Pressure intensity override
+Key 1 - Shift Key 2 - form / bury (records new top layer and burries previous top layer on completion). Key 3 - Toggle Automatic recording mode on/off (on by default) Shift + key 2 - Cycle "Environment" Shift + key 3 - Excavate (Clears all active layers) Encoder 1 - "Environment" intensity Encoder 2 - Weather intensity (20% at boot) Encoder 3 - Pressure intensity override
 
 ***Visual Feedback-
 
