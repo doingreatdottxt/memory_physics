@@ -2,7 +2,7 @@
 Engine_MemoryPhysics : CroneEngine {
     var <buffers, <synths, <recSynth, <maxLayers = 6;
     var <recBuffer;
-    var <phaseBus, <envIntBus, <weatherBus, <pressureBus, <envBus, <volBus, <durBus;
+    var <phaseBus, <envIntBus, <weatherBus, <pressureBus, <envBus, <volBus;
     var <baseFcBus, <modFcBus, <baseRqBus, <modRqBus, <driftBus;
     var <durations, <synthDepths;
     var <fxBus, <fxSynth, <monitorSynth, <bgSynth, <chirpSynth;
@@ -26,8 +26,6 @@ Engine_MemoryPhysics : CroneEngine {
         envBus = Bus.control(context.server, 1).set(0);
         volBus = Bus.control(context.server, 1).set(1.0);
         
-        durBus = Bus.control(context.server, maxLayers);
-        durBus.setAll(2.0);
         durations = Array.fill(maxLayers, { 2.0 });
         synthDepths = Array.fill(maxLayers, { arg i; i });
 
@@ -189,8 +187,8 @@ Engine_MemoryPhysics : CroneEngine {
         }).add;
 
         // 5. LAYER PLAYBACK ENGINE
-        SynthDef(\StrataLayer, { arg buf, out, depth=0, dur_idx, t_reset=0, shift_offset=0;
-            var sig, raw_phase, phase, frames, offset_frames, duration, rate, layer_vol;
+        SynthDef(\StrataLayer, { arg buf, out, depth=0, duration=2.0, t_reset=0, shift_offset=0;
+            var sig, raw_phase, phase, frames, offset_frames, rate, layer_vol;
             var drift, layer_weather, crackle, seismic_jitter;
             var w_val, w_gate, env_idx, p_override, base_pressure, pressure;
             var base_fc, mod_fc, base_rq, mod_rq, lpf, rq, p_sq;
@@ -201,7 +199,6 @@ Engine_MemoryPhysics : CroneEngine {
             w_val = In.kr(weatherBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
             p_override = In.kr(pressureBus.index, 1);
-            duration = In.kr(durBus.index + dur_idx, 1);
             drift = In.kr(driftBus.index, 1);
             
             base_fc = In.kr(baseFcBus.index, 1);
@@ -220,22 +217,23 @@ Engine_MemoryPhysics : CroneEngine {
             seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
             rate = 1.0 + (SinOsc.kr(drift * 25) * (layer_weather * drift)) + seismic_jitter;
             
+            // Map duration natively to explicit Synth parameters to avoid Bus index offset corruption
             frames = duration * BufSampleRate.kr(buf);
             offset_frames = shift_offset * BufSampleRate.kr(buf);
             raw_phase = Phasor.ar(t_reset, BufRateScale.kr(buf) * rate, 0, frames, 0);
             
-            phase = (raw_phase - offset_frames).mod(frames);
+            // Replaced jitter-prone .mod with strictly bounded Wrap.ar
+            phase = Wrap.ar(raw_phase - offset_frames, 0, frames);
             sig = BufRd.ar(2, buf, phase, loop: 1);
             
-            SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / frames], 998);
+            // Explicitly downsample phase via A2K before dispatching OSC to prevent block instability
+            SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, A2K.kr(phase) / frames], 998);
 
-            // TWEAK: Multiplier cap limited strictly to 2.5x max instead of 4.0x
             drive = Select.kr(env_idx % 8, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0, 1.0]) * pressure.linexp(0, 1, 1, 2.5);
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = SelectX.ar(pressure > 0, [sig, driveSig]);
 
             wobbleRate = pressure.linlin(0, 1, 0.1, 5.0);
-            // TWEAK: Depth tracking threshold reduced from 0.008 to 0.002 (25% maximum limit)
             wobbleDepth = pressure.linlin(0, 1, 0.0, 0.002);
             wobble = LFDNoise3.ar(wobbleRate, wobbleDepth);
             sig = DelayC.ar(sig, 0.02, 0.01 + wobble);
@@ -269,7 +267,7 @@ Engine_MemoryPhysics : CroneEngine {
 
         Synth(\InputTracker, [\in, context.in_b[0].index], context.xg);
         synths = Array.fill(maxLayers, { arg i;
-            Synth(\StrataLayer, [\buf, buffers[i], \out, fxBus.index, \depth, i, \dur_idx, i], context.xg);
+            Synth(\StrataLayer, [\buf, buffers[i], \out, fxBus.index, \depth, i, \duration, 2.0], context.xg);
         });
 
         monitorSynth = Synth(\InputMonitor, [\in, context.in_b[0].index, \out, fxBus.index], context.xg);
@@ -287,13 +285,12 @@ Engine_MemoryPhysics : CroneEngine {
             
             recBuffer.copyData(buffers[newLayer0SynthIndex]);
             durations[newLayer0SynthIndex] = new_dur;
-            context.server.sendMsg("/c_set", durBus.index + newLayer0SynthIndex, new_dur);
             
             synths.do({ arg syn, i; 
                 syn.set(\depth, synthDepths[i]); 
             });
             
-            synths[newLayer0SynthIndex].set(\t_reset, 1, \shift_offset, shift_val);
+            synths[newLayer0SynthIndex].set(\duration, new_dur, \t_reset, 1, \shift_offset, shift_val);
         });
 
         this.addCommand(\erode_layer, "", {
@@ -302,7 +299,7 @@ Engine_MemoryPhysics : CroneEngine {
             newLayer5SynthIndex = synthDepths.indexOf(maxLayers - 1);
             buffers[newLayer5SynthIndex].zero;
             durations[newLayer5SynthIndex] = 2.0;
-            context.server.sendMsg("/c_set", durBus.index + newLayer5SynthIndex, 2.0);
+            synths[newLayer5SynthIndex].set(\duration, 2.0);
             synths.do({ arg syn, i; syn.set(\depth, synthDepths[i]); });
         });
 
@@ -310,12 +307,12 @@ Engine_MemoryPhysics : CroneEngine {
             buffers.do({ arg b; b.zero; });
             recBuffer.zero;
             synthDepths = Array.fill(maxLayers, {arg i; i});
-            synths.do({ arg syn, i; syn.set(\depth, synthDepths[i]); });
+            synths.do({ arg syn, i; syn.set(\depth, synthDepths[i], \duration, 2.0); });
         });
 
         this.addCommand(\set_duration, "if", { arg msg;
             durations[msg[1]] = msg[2];
-            context.server.sendMsg("/c_set", durBus.index + msg[1], msg[2]);
+            synths[msg[1]].set(\duration, msg[2]);
         });
 
         this.addCommand(\set_env_intensity, "f", { arg msg; envIntBus.set(msg[1]); });
@@ -351,7 +348,6 @@ Engine_MemoryPhysics : CroneEngine {
         pressureBus.free;
         envBus.free;
         volBus.free;
-        durBus.free;
         baseFcBus.free;
         modFcBus.free;
         baseRqBus.free;
