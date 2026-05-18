@@ -188,7 +188,7 @@ Engine_MemoryPhysics : CroneEngine {
             Out.ar(out, sig);
         }).add;
 
-        // 5. LAYER PLAYBACK ENGINE (Now featuring Sub-Grid Smart Shifting)
+        // 5. LAYER PLAYBACK ENGINE
         SynthDef(\StrataLayer, { arg buf, out, depth=0, dur_idx, t_reset=0, shift_offset=0;
             var sig, raw_phase, phase, frames, offset_frames, duration, rate, layer_vol;
             var drift, layer_weather, crackle, seismic_jitter;
@@ -220,24 +220,23 @@ Engine_MemoryPhysics : CroneEngine {
             seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
             rate = 1.0 + (SinOsc.kr(drift * 25) * (layer_weather * drift)) + seismic_jitter;
             
-            // Smart Shift Quantization Math
             frames = duration * BufSampleRate.kr(buf);
             offset_frames = shift_offset * BufSampleRate.kr(buf);
             raw_phase = Phasor.ar(t_reset, BufRateScale.kr(buf) * rate, 0, frames, 0);
             
-            // Apply offset and cleanly wrap around the buffer constraints
             phase = (raw_phase - offset_frames).mod(frames);
-            
             sig = BufRd.ar(2, buf, phase, loop: 1);
             
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / frames], 998);
 
-            drive = Select.kr(env_idx % 8, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0, 1.0]) * pressure.linexp(0, 1, 1, 4);
+            -- TWEAK: Multiplier cap limited strictly to 2.5x max instead of 4.0x
+            drive = Select.kr(env_idx % 8, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0, 1.0]) * pressure.linexp(0, 1, 1, 2.5);
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = SelectX.ar(pressure > 0, [sig, driveSig]);
 
             wobbleRate = pressure.linlin(0, 1, 0.1, 5.0);
-            wobbleDepth = pressure.linlin(0, 1, 0.0, 0.008);
+            -- TWEAK: Depth tracking threshold reduced from 0.008 to 0.002 (25% maximum limit)
+            wobbleDepth = pressure.linlin(0, 1, 0.0, 0.002);
             wobble = LFDNoise3.ar(wobbleRate, wobbleDepth);
             sig = DelayC.ar(sig, 0.02, 0.01 + wobble);
 
@@ -278,7 +277,6 @@ Engine_MemoryPhysics : CroneEngine {
         chirpSynth = Synth(\EnvChirps, [\out, fxBus.index], context.xg);
         fxSynth = Synth.after(context.xg, \MasterFX, [\in, fxBus.index, \out, context.out_b.index]);
 
-        // Updated Command: Receives target phase offset alongside the duration
         this.addCommand(\shift_layers, "ff", { arg msg;
             var new_dur = msg[1];
             var shift_val = msg[2];
@@ -295,7 +293,6 @@ Engine_MemoryPhysics : CroneEngine {
                 syn.set(\depth, synthDepths[i]); 
             });
             
-            // Hard sync the new layer to frame 0 and apply the mathematical offset
             synths[newLayer0SynthIndex].set(\t_reset, 1, \shift_offset, shift_val);
         });
 
