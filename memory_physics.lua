@@ -173,25 +173,22 @@ function calculate_quantized_duration(raw_dur)
   return final_dur
 end
 
--- Calculates the necessary micro-shift to sync organic timing to the established grid
 function calculate_smart_shift()
   if params:get("quant_mode") ~= 2 or state.layers_active == 0 then
     return 0.0
   end
-  
   if #state.onset_timestamps == 0 then
     return 0.0
   end
 
   local master_bar = params:get("bar_length")
   local eighth_grid = master_bar / 8
-  local max_shift = eighth_grid / 2 -- Prevents correction from exceeding a 1/16th note limit
+  local max_shift = eighth_grid / 2
   
   local first_onset_rel = state.onset_timestamps[1] - state.start_time
   local nearest_grid = math.floor(first_onset_rel / eighth_grid + 0.5) * eighth_grid
   local raw_shift = nearest_grid - first_onset_rel
   
-  -- Hard mathematical clamp avoids API-dependent util wrappers
   return math.max(-max_shift, math.min(max_shift, raw_shift))
 end
 
@@ -258,38 +255,43 @@ end
 
 function redraw()
   screen.clear()
+  
+  -- HEADER JUSTIFICATION
   screen.level(state.recording and 15 or 3)
   screen.move(0, 8)
-  
   local msg = state.recording and "FORMING STRATA" or "STABLE"
   screen.text(msg .. " [" .. string.format("%.2f", state.duration) .. "s] C:" .. state.surface_cycles .. "/5")
   
+  -- Moved Environment name to the right hand side of the header
   local current_env = envs.list[params:get("environment")]
+  screen.move(128, 8)
+  screen.text_right(string.upper(current_env))
   
+  -- SHIFTED STRATA LAYER DISPLAY (Left-justified, constrained width to x=96)
   for i = 1, 6 do
     local y = 14 + (i * 7)
     if i <= state.layers_active then
       screen.level(math.floor(math.max(1, 11 - (i * 1.5))))
       if i == 1 then
-        screen.move(10, y + 3)
-        screen.line(118, y + 3)
+        screen.move(0, y + 3)
+        screen.line(96, y + 3)
         screen.stroke()
         if current_env == "Grove" or current_env == "Swamp" then
-          screen.move(25, y + 1) screen.line_rel(0, 2)
-          screen.move(70, y + 1) screen.line_rel(0, 2)
-          screen.move(105, y + 1) screen.line_rel(0, 2)
+          screen.move(20, y + 1) screen.line_rel(0, 2)
+          screen.move(50, y + 1) screen.line_rel(0, 2)
+          screen.move(80, y + 1) screen.line_rel(0, 2)
           screen.stroke()
         elseif current_env == "Mountain" or current_env == "Sand" or current_env == "Cave" then
-          screen.move(40, y + 3) screen.line_rel(2, -2) screen.line_rel(2, 2)
-          screen.move(85, y + 3) screen.line_rel(2, -2) screen.line_rel(2, 2)
+          screen.move(30, y + 3) screen.line_rel(2, -2) screen.line_rel(2, 2)
+          screen.move(70, y + 3) screen.line_rel(2, -2) screen.line_rel(2, 2)
           screen.stroke()
         elseif current_env == "Sea" or current_env == "River Bank" then
-          screen.move(30, y + 2) screen.line_rel(3, 0)
-          screen.move(75, y + 2) screen.line_rel(3, 0)
+          screen.move(25, y + 2) screen.line_rel(3, 0)
+          screen.move(65, y + 2) screen.line_rel(3, 0)
           screen.stroke()
         end
       else
-        for x = 10, 118, 4 do
+        for x = 0, 96, 4 do
           local offset = (x % (3 * i)) == 0 and (math.floor(i * 0.5)) or 0
           screen.move(x, y + 3 + offset)
           screen.line_rel(3, 0)
@@ -298,19 +300,30 @@ function redraw()
       end
       local p = layer_phases[i] or 0.0
       screen.level(math.floor(math.max(4, 16 - (i * 2))))
-      screen.rect(10 + (p * 108), y + 2, 2, 2)
+      screen.rect(0 + (p * 94), y + 2, 2, 2)
       screen.fill()
     else
       screen.level(1)
-      screen.move(20, y + 3)
-      screen.line(100, y + 3)
+      screen.move(0, y + 3)
+      screen.line(96, y + 3)
       screen.stroke()
     end
   end
   
+  -- SIDEBAR SIDE-STACKED MODULATION PERCENTAGES
   screen.level(3)
-  screen.move(0, 62)
-  local styles = {"FREE", "RHYTHMIC MODE"}
-  screen.text(current_env .. " (" .. styles[params:get("quant_mode")] .. ") | E:" .. math.floor(params:get("env_intensity") * 100) .. "% W:" .. math.floor(params:get("weather") * 100) .. "%")
+  screen.move(128, 25)
+  screen.text_right("E " .. math.floor(params:get("env_intensity") * 100) .. "%")
+  screen.move(128, 35)
+  screen.text_right("W " .. math.floor(params:get("weather") * 100) .. "%")
+  screen.move(128, 45)
+  screen.text_right("P " .. math.floor(params:get("pressure") * 100) .. "%")
+  
+  -- FOOTER JUSTIFICATION
+  -- Moved Quantization Style name out of overcrowding to the right side of the footer
+  screen.move(128, 62)
+  local styles = {"FREE", "RHYTHMIC"}
+  screen.text_right(styles[params:get("quant_mode")])
+  
   screen.update()
 end
