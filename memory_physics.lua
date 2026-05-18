@@ -1,5 +1,16 @@
 -- memory_physics.lua
--- Last In First Out Looper with Geological Strata Layer Physics
+-- Last In First Out /^\/^\
+--  /^\ Geological Strata /^\
+-- /^\/^\Looper/^\/^\/^\/^\
+-- ____________________________
+-- Key 1 - Shift 
+-- Key 2 - Rec Start/Stop
+-- Key 3 - Quantization
+-- Shift + key 2 - Environment Sel.
+-- Shift + key 3 - Excavate Surface 
+-- Encoder 1 - Environment %
+-- Encoder 2 - Weather %
+-- Encoder 3 - Pressure %
 
 engine.name = 'MemoryPhysics'
 
