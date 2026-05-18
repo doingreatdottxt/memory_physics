@@ -229,13 +229,13 @@ Engine_MemoryPhysics : CroneEngine {
             
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, phase / frames], 998);
 
-            -- TWEAK: Multiplier cap limited strictly to 2.5x max instead of 4.0x
+            // TWEAK: Multiplier cap limited strictly to 2.5x max instead of 4.0x
             drive = Select.kr(env_idx % 8, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0, 1.0]) * pressure.linexp(0, 1, 1, 2.5);
             driveSig = (sig * drive).tanh * (1.0 / (drive.sqrt));
             sig = SelectX.ar(pressure > 0, [sig, driveSig]);
 
             wobbleRate = pressure.linlin(0, 1, 0.1, 5.0);
-            -- TWEAK: Depth tracking threshold reduced from 0.008 to 0.002 (25% maximum limit)
+            // TWEAK: Depth tracking threshold reduced from 0.008 to 0.002 (25% maximum limit)
             wobbleDepth = pressure.linlin(0, 1, 0.0, 0.002);
             wobble = LFDNoise3.ar(wobbleRate, wobbleDepth);
             sig = DelayC.ar(sig, 0.02, 0.01 + wobble);
