@@ -133,7 +133,6 @@ local function extract_rhythmic_pulse()
   local deltas = {}
   for i = 2, #state.onset_timestamps do
     local diff = state.onset_timestamps[i] - state.onset_timestamps[i-1]
-    -- Lowered debounce to 80ms to catch faster 8th/16th note rhythms
     if diff > 0.08 then 
       table.insert(deltas, diff)
     end
@@ -148,38 +147,52 @@ function calculate_quantized_duration(raw_dur)
   local final_dur = raw_dur
 
   if mode == 1 then
-    -- FREE MODE
     final_dur = math.min(raw_dur, MAX_TIME)
-
   elseif mode == 2 then
-    -- RHYTHMIC MODE
     if state.layers_active == 0 then
       local detected_pulse = extract_rhythmic_pulse()
       if detected_pulse then
-        -- Snap the initial layer to the exact multiple of the detected rhythm pulse
         local count = math.floor((raw_dur / detected_pulse) + 0.5)
         count = math.max(1, count)
         final_dur = math.min(count * detected_pulse, MAX_TIME)
-        
-        -- Store the pulse as our 1/8th note grid. (A "bar" is conceptually 8 of these pulses)
         params:set("bar_length", detected_pulse * 8)
       else
         final_dur = math.min(raw_dur, MAX_TIME)
         params:set("bar_length", final_dur)
       end
     else
-      -- Subsequent layers: Snap strictly to the 8th note grid of the established master bar
       local master_bar = params:get("bar_length")
       local eighth_grid = master_bar / 8
       local count = math.floor((raw_dur / eighth_grid) + 0.5)
       count = math.max(1, count)
-      
       final_dur = math.min(count * eighth_grid, MAX_TIME)
     end
   end
 
   if final_dur < 0.1 then final_dur = 0.1 end
   return final_dur
+end
+
+-- Calculates the necessary micro-shift to sync organic timing to the established grid
+function calculate_smart_shift()
+  if params:get("quant_mode") ~= 2 or state.layers_active == 0 then
+    return 0.0
+  end
+  
+  if #state.onset_timestamps == 0 then
+    return 0.0
+  end
+
+  local master_bar = params:get("bar_length")
+  local eighth_grid = master_bar / 8
+  local max_shift = eighth_grid / 2 -- Prevents correction from exceeding a 1/16th note limit
+  
+  local first_onset_rel = state.onset_timestamps[1] - state.start_time
+  local nearest_grid = math.floor(first_onset_rel / eighth_grid + 0.5) * eighth_grid
+  local raw_shift = nearest_grid - first_onset_rel
+  
+  -- Hard mathematical clamp avoids API-dependent util wrappers
+  return math.max(-max_shift, math.min(max_shift, raw_shift))
 end
 
 function toggle_formation()
@@ -196,9 +209,10 @@ function toggle_formation()
     local measured_dur = util.time() - state.start_time
     
     state.duration = calculate_quantized_duration(measured_dur)
+    local smart_shift_offset = calculate_smart_shift()
     
     engine.record_stop()
-    engine.shift_layers(state.duration)
+    engine.shift_layers(state.duration, smart_shift_offset)
     state.layers_active = math.min(state.max_layers, state.layers_active + 1)
   end
 end
@@ -274,8 +288,6 @@ function redraw()
           screen.move(75, y + 2) screen.line_rel(3, 0)
           screen.stroke()
         end
-        -- Note: "Void" gracefully bypasses all the if/elseif condition styling 
-        -- and just leaves the stark flat horizon line drawn at the beginning of the block.
       else
         for x = 10, 118, 4 do
           local offset = (x % (3 * i)) == 0 and (math.floor(i * 0.5)) or 0
