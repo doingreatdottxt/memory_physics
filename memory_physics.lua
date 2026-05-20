@@ -100,15 +100,15 @@ function setup_params()
   params:add_control("main_vol", "GLOBAL VOLUME", controlspec.new(0, 2, 'lin', 0.01, 1.0))
   params:set_action("main_vol", function(x) engine.set_volume(x) end)
   
-  params:add_option("auto_record", "TRIGGER", {"MANUAL [K2]", "AUTOMATIC [AMP]"}, 2)
+  params:add_option("auto_record", "RECORD TRIGGER MODE", {"MANUAL [K2]", "AUTOMATIC [AMP]"}, 2)
   params:add_control("threshold", "AUTO THRESHOLD", controlspec.new(0.001, 1.0, 'exp', 0.001, 0.05))
   params:add_control("release_time", "AUTO TIMEOUT RELEASE (S)", controlspec.new(0.1, 5.0, 'lin', 0.1, 2.0))
   
-  params:add_option("quant_mode", "QUANTIZATION STYLE", {"FREE", "RHYTHMIC"}, 1)
+  params:add_option("quant_mode", "QUANTIZATION STYLE", {"FREE", "RHYTHMIC MODE"}, 1)
   params:add_control("bar_length", "BAR SYSTEM BEDROCK", controlspec.new(0.1, MAX_TIME, 'lin', 0.01, 2.0, "s"))
   params:hide("bar_length")
 
-  params:add_option("environment", "ACTIVE ECOSYSTEM", envs.list, 8)
+  params:add_option("environment", "ACTIVE ECOSYSTEM BIOME", envs.list, 8)
   params:set_action("environment", function(x)
     local env_name = envs.list[x]
     local d = envs.data[env_name]
@@ -127,7 +127,7 @@ function setup_params()
   params:add_control("pressure", "PRESSURE MANIFEST OVERRIDE", controlspec.new(0, 1, 'lin', 0.01, 0))
   params:set_action("pressure", function(x) engine.set_pressure(x) end)
   
-  params:add_trigger("excavate", "EXCAVATE SITE")
+  params:add_trigger("excavate", "EXCAVATE ENTIRE SITE")
   params:set_action("excavate", function()
     state.layers_active = 0
     state.surface_cycles = 0
@@ -267,18 +267,15 @@ end
 function redraw()
   screen.clear()
   
-  -- HEADER JUSTIFICATION
   screen.level(state.recording and 15 or 3)
   screen.move(0, 8)
-  local msg = state.recording and "FORMING" or "STABLE"
+  local msg = state.recording and "FORMING STRATA" or "STABLE"
   screen.text(msg .. " [" .. string.format("%.2f", state.duration) .. "s] C:" .. state.surface_cycles .. "/5")
   
-  -- Moved Environment name to the right hand side of the header
   local current_env = envs.list[params:get("environment")]
   screen.move(128, 8)
   screen.text_right(string.upper(current_env))
   
-  -- SHIFTED STRATA LAYER DISPLAY (Left-justified, constrained width to x=96)
   for i = 1, 6 do
     local y = 14 + (i * 7)
     if i <= state.layers_active then
@@ -321,7 +318,6 @@ function redraw()
     end
   end
   
-  -- SIDEBAR SIDE-STACKED MODULATION PERCENTAGES
   screen.level(3)
   screen.move(128, 25)
   screen.text_right("E " .. math.floor(params:get("env_intensity") * 100) .. "%")
@@ -330,8 +326,6 @@ function redraw()
   screen.move(128, 45)
   screen.text_right("P " .. math.floor(params:get("pressure") * 100) .. "%")
   
-  -- FOOTER JUSTIFICATION
-  -- Moved Quantization Style name out of overcrowding to the right side of the footer
   screen.move(128, 62)
   local styles = {"FREE", "RHYTHMIC"}
   screen.text_right(styles[params:get("quant_mode")])
