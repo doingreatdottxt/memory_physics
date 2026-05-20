@@ -187,14 +187,13 @@ Engine_MemoryPhysics : CroneEngine {
         }).add;
 
         // 5. LAYER PLAYBACK ENGINE
-        SynthDef(\StrataLayer, { arg buf, out, depth=0, duration=2.0, t_reset=0, shift_offset=0;
+        SynthDef(\StrataLayer, { arg buf, out, depth=0, duration=2.0, t_reset=0, shift_offset=0, fade_time=4.0;
             var sig, raw_phase, phase, frames, offset_frames, rate, layer_vol;
             var drift, layer_weather, crackle, seismic_jitter;
             var w_val, w_gate, env_idx, p_override, base_pressure, pressure;
             var base_fc, mod_fc, base_rq, mod_rq, lpf, rq, p_sq;
             var drive, driveSig;
             var wobbleRate, wobbleDepth, wobble;
-            var fade_time = 4.0;
 
             w_val = In.kr(weatherBus.index, 1);
             env_idx = In.kr(envBus.index, 1);
@@ -217,16 +216,13 @@ Engine_MemoryPhysics : CroneEngine {
             seismic_jitter = TRand.kr(-0.012, 0.012, crackle) * layer_weather;
             rate = 1.0 + (SinOsc.kr(drift * 25) * (layer_weather * drift)) + seismic_jitter;
             
-            // Map duration natively to explicit Synth parameters to avoid Bus index offset corruption
             frames = duration * BufSampleRate.kr(buf);
             offset_frames = shift_offset * BufSampleRate.kr(buf);
             raw_phase = Phasor.ar(t_reset, BufRateScale.kr(buf) * rate, 0, frames, 0);
             
-            // Replaced jitter-prone .mod with strictly bounded Wrap.ar
             phase = Wrap.ar(raw_phase - offset_frames, 0, frames);
             sig = BufRd.ar(2, buf, phase, loop: 1);
             
-            // Explicitly downsample phase via A2K before dispatching OSC to prevent block instability
             SendReply.kr(Impulse.kr(15), '/layer_phase', [depth, A2K.kr(phase) / frames], 998);
 
             drive = Select.kr(env_idx % 8, [3.5, 5.0, 1.2, 1.0, 1.1, 1.5, 1.0, 1.0]) * pressure.linexp(0, 1, 1, 2.5);
@@ -297,10 +293,16 @@ Engine_MemoryPhysics : CroneEngine {
             var newLayer5SynthIndex;
             synthDepths = synthDepths.collect({ arg d; (d - 1).wrap(0, maxLayers - 1) });
             newLayer5SynthIndex = synthDepths.indexOf(maxLayers - 1);
-            buffers[newLayer5SynthIndex].zero;
-            durations[newLayer5SynthIndex] = 2.0;
-            synths[newLayer5SynthIndex].set(\duration, 2.0);
+            
+            synths[newLayer5SynthIndex].set(\fade_time, 0.5);
             synths.do({ arg syn, i; syn.set(\depth, synthDepths[i]); });
+            
+            SystemClock.sched(0.5, {
+                buffers[newLayer5SynthIndex].zero;
+                durations[newLayer5SynthIndex] = 2.0;
+                synths[newLayer5SynthIndex].set(\duration, 2.0, \fade_time, 4.0);
+                nil;
+            });
         });
 
         this.addCommand(\clear_layers, "", {
