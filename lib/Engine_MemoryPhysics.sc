@@ -196,12 +196,11 @@ Engine_MemoryPhysics : CroneEngine {
             base_rq = In.kr(baseRqBus.index, 1);
             mod_rq = In.kr(modRqBus.index, 1);
 
-            // Calculate instantaneous pressure based on depth and override (silencing the active surface)
             base_pressure = Select.kr(depth, [0.0, 0.1, 0.25, 0.4, 0.6, 0.8]).lag(fade_time);
             current_p = ((p_override + base_pressure) * (depth > 0)).clip(0, 1);
             
-            // RunningMax persistently locks in the highest pressure. It drops back to 0.0 only when t_reset fires.
-            pressure = RunningMax.kr(current_p, t_reset);
+            // FIX: Changed.kr ensures the tracking engine catches and locks initial non-zero parameter transitions
+            pressure = RunningMax.kr(current_p, Changed.kr(current_p) + t_reset);
             p_sq = pressure * pressure;
 
             w_gate = w_val >= 0.8;
@@ -276,6 +275,7 @@ Engine_MemoryPhysics : CroneEngine {
                 syn.set(\depth, synthDepths[i]); 
             });
             
+            // Trigger t_reset to un-lock historical pressure when returning to surface
             synths[newLayer0SynthIndex].set(\duration, new_dur, \t_reset, 1, \shift_offset, shift_val);
         });
 
